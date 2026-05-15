@@ -31,8 +31,14 @@ async function main() {
     process.exit(1);
   }
 
+  const sigType = parseInt(process.env.SIGNATURE_TYPE || '0', 10);
   const wallet = new Wallet(pk);
+  // For POLY_PROXY (1) or GNOSIS_SAFE (2): auth with proxy address
+  const authAddress = sigType === 0 ? wallet.address : (process.env.PROXY_ADDRESS || wallet.address);
+
   console.log(`Wallet address: ${wallet.address}`);
+  console.log(`Auth address:   ${authAddress}`);
+  console.log(`Signature type: ${sigType}`);
 
   // Get server time
   const timeResp = await fetch(`${CLOB_URL}/time`);
@@ -43,7 +49,7 @@ async function main() {
   const nonce = 0;
   const domain = { name: 'ClobAuthDomain', version: '1', chainId: CHAIN_ID };
   const value = {
-    address: wallet.address,
+    address: authAddress,
     timestamp,
     nonce,
     message: 'This message attests that I control the given wallet',
@@ -55,7 +61,7 @@ async function main() {
   const deriveResp = await fetch(`${CLOB_URL}/auth/derive-api-key`, {
     method: 'GET',
     headers: {
-      'POLY_ADDRESS': wallet.address,
+      'POLY_ADDRESS': authAddress,
       'POLY_SIGNATURE': signature,
       'POLY_TIMESTAMP': timestamp,
       'POLY_NONCE': nonce.toString(),
@@ -73,7 +79,7 @@ async function main() {
   const createResp = await fetch(`${CLOB_URL}/auth/api-key`, {
     method: 'POST',
     headers: {
-      'POLY_ADDRESS': wallet.address,
+      'POLY_ADDRESS': authAddress,
       'POLY_SIGNATURE': signature,
       'POLY_TIMESTAMP': timestamp,
       'POLY_NONCE': nonce.toString(),
