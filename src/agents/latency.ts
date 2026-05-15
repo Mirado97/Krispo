@@ -58,16 +58,30 @@ export class LatencyMonitor {
   }
 
   private logMetrics(): void {
-    if (this.cycleCount === 0) return;
+    if (this.metrics.binanceLatencyMs === 0 && this.metrics.polymarketWsLatencyMs === 0) return;
+
+    if (this.cycleCount === 0) {
+      // DRY_RUN — show only WS latencies (no real order cycles)
+      log.info(
+        {
+          binance_ws_мс: this.metrics.binanceLatencyMs.toFixed(1),
+          polymarket_ws_мс: this.metrics.polymarketWsLatencyMs.toFixed(1),
+        },
+        'Задержки WebSocket',
+      );
+      return;
+    }
+
     log.info(
       {
-        cycles: this.cycleCount,
-        ewmaCycleMs: this.metrics.ewmaCycleMs.toFixed(1),
-        lastCycleMs: this.metrics.cycleLatencyMs.toFixed(1),
-        signMs: this.metrics.signLatencyMs.toFixed(1),
-        cancelMs: this.metrics.cancelLatencyMs.toFixed(1),
-        submitMs: this.metrics.submitLatencyMs.toFixed(1),
-        binanceMs: this.metrics.binanceLatencyMs.toFixed(1),
+        циклов: this.cycleCount,
+        цикл_ewma_мс: this.metrics.ewmaCycleMs.toFixed(1),
+        цикл_последний_мс: this.metrics.cycleLatencyMs.toFixed(1),
+        подпись_мс: this.metrics.signLatencyMs.toFixed(1),
+        отмена_мс: this.metrics.cancelLatencyMs.toFixed(1),
+        отправка_мс: this.metrics.submitLatencyMs.toFixed(1),
+        binance_ws_мс: this.metrics.binanceLatencyMs.toFixed(1),
+        polymarket_ws_мс: this.metrics.polymarketWsLatencyMs.toFixed(1),
       },
       'Отчёт по задержкам',
     );
