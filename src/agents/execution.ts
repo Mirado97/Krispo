@@ -98,7 +98,7 @@ export class ExecutionAgent extends EventEmitter {
     if (!this.market) return { cycleMs: 0, signMs: 0, cancelMs: 0, submitMs: 0 };
 
     if (CONFIG.DRY_RUN) {
-      log.info(
+      log.debug(
         { bid: quote.bidPrice.toFixed(4), ask: quote.askPrice.toFixed(4), fv: quote.fairValue.toFixed(4), spread: (quote.spread * 10000).toFixed(0) + 'bps' },
         '[DRY_RUN] would cancelAndReplace',
       );
