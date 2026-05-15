@@ -4,6 +4,8 @@ import type { L2Book } from '../types.js';
 const log = childLogger('PaperTrader');
 
 const REPORT_INTERVAL_MS = 60_000;
+// Re-arm pending only if price changed by more than this (avoid re-arming every Binance tick)
+const MIN_PRICE_CHANGE = 0.005;
 
 export class PaperTrader {
   private bidPrice = 0;
@@ -19,31 +21,41 @@ export class PaperTrader {
   private trades = 0;
   private lastReportAt = 0;
 
-  // Called every time the quoting engine computes a new quote
+  // Called every time the quoting engine computes a new quote.
+  // Only re-arms the fill flag when the price moves by more than MIN_PRICE_CHANGE
+  // — prevents re-arming on every Binance tick.
   updateQuote(bid: number, ask: number, bidSize: number, askSize: number): void {
-    this.bidPrice = bid;
-    this.askPrice = ask;
-    this.bidSize = bidSize;
-    this.askSize = askSize;
-    this.bidPending = bidSize > 0;
-    this.askPending = askSize > 0;
+    if (Math.abs(bid - this.bidPrice) >= MIN_PRICE_CHANGE || bidSize !== this.bidSize) {
+      this.bidPrice = bid;
+      this.bidSize = bidSize;
+      this.bidPending = bidSize > 0;
+    }
+    if (Math.abs(ask - this.askPrice) >= MIN_PRICE_CHANGE || askSize !== this.askSize) {
+      this.askPrice = ask;
+      this.askSize = askSize;
+      // Can only have an active ask if we hold shares to sell
+      this.askPending = askSize > 0 && this.yesShares > 0;
+    }
   }
 
-  // Called on every book_update — checks if virtual orders would have been filled
+  // Called on every book_update — checks if virtual orders would have been filled.
   checkFills(yesBook: L2Book, fairValue: number): void {
-    if (this.bidPending && yesBook.asks.length > 0) {
+    // BUY fill: someone offers to sell at or below our bid
+    if (this.bidPending && this.bidSize > 0 && yesBook.asks.length > 0) {
       const bestAsk = yesBook.asks[0].price;
       if (bestAsk <= this.bidPrice) {
         this.buyFill(this.bidPrice, this.bidSize);
         this.bidPending = false;
+        // After buying, arm the ask side
+        this.askPending = this.askSize > 0 && this.yesShares > 0;
       }
     }
 
-    if (this.askPending && yesBook.bids.length > 0) {
+    // SELL fill: someone wants to buy at or above our ask — only if we hold shares
+    if (this.askPending && this.yesShares > 0 && yesBook.bids.length > 0) {
       const bestBid = yesBook.bids[0].price;
       if (bestBid >= this.askPrice) {
-        const sellSize = this.yesShares > 0 ? Math.min(this.askSize, this.yesShares) : this.askSize;
-        this.sellFill(this.askPrice, sellSize);
+        this.sellFill(this.askPrice, Math.min(this.askSize, this.yesShares));
         this.askPending = false;
       }
     }
@@ -61,13 +73,13 @@ export class PaperTrader {
     this.yesShares = newShares;
     this.trades++;
     log.info(
-      { side: 'BUY', price: price.toFixed(4), size: size.toFixed(2), позиция: this.yesShares.toFixed(2) },
+      { side: 'BUY', price: price.toFixed(4), size: size.toFixed(2), позиция: this.yesShares.toFixed(2), средняя_цена: this.avgEntry.toFixed(4) },
       'Виртуальная сделка',
     );
   }
 
   private sellFill(price: number, size: number): void {
-    if (size <= 0) return;
+    if (size <= 0 || this.avgEntry === 0) return;
     const pnl = (price - this.avgEntry) * size;
     this.realizedPnl += pnl;
     this.yesShares = Math.max(0, this.yesShares - size);
@@ -91,7 +103,9 @@ export class PaperTrader {
 
   private report(fairValue: number): void {
     if (this.trades === 0) return;
-    const unrealizedPnl = this.yesShares > 0 ? (fairValue - this.avgEntry) * this.yesShares : 0;
+    const unrealizedPnl = this.yesShares > 0 && this.avgEntry > 0
+      ? (fairValue - this.avgEntry) * this.yesShares
+      : 0;
     log.info(
       {
         сделок: this.trades,
