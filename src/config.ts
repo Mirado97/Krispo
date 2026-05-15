@@ -114,7 +114,7 @@ export const CONFIG = {
 
   // Polygon
   POLYGON_RPC_URL: process.env.POLYGON_RPC_URL || 'https://polygon-bor-rpc.publicnode.com',
-  USDC_E_ADDRESS: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+  USDC_E_ADDRESS: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // native USDC on Polygon (Polymarket migrated from USDC.e)
   CTF_TOKEN_ADDRESS: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
 
   AMOUNT_DECIMALS: 6,
