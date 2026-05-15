@@ -46,12 +46,12 @@ export class MarketDataAgent extends EventEmitter {
 
   private connect(): void {
     if (!this.alive) return;
-    log.info({ url: CONFIG.BINANCE_WS_URL }, 'Connecting to Binance');
+    log.info({ url: CONFIG.BINANCE_WS_URL }, 'Подключение к Binance');
 
     this.ws = new WebSocket(CONFIG.BINANCE_WS_URL);
 
     this.ws.on('open', () => {
-      log.info('Binance WebSocket connected');
+      log.info('Binance WebSocket подключён');
     });
 
     this.ws.on('message', (raw: Buffer) => {
@@ -65,12 +65,12 @@ export class MarketDataAgent extends EventEmitter {
     });
 
     this.ws.on('close', (code: number) => {
-      log.warn({ code }, 'Binance WebSocket closed');
+      log.warn({ code }, 'Binance WebSocket закрыт');
       this.scheduleReconnect();
     });
 
     this.ws.on('error', (err: Error) => {
-      log.error({ err: err.message }, 'Binance WebSocket error');
+      log.error({ err: err.message }, 'Ошибка Binance WebSocket');
     });
   }
 

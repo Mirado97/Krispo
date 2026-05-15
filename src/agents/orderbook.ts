@@ -32,7 +32,7 @@ export class OrderbookAgent extends EventEmitter {
 
   start(): void {
     this.alive = true;
-    log.info('OrderbookAgent started (waiting for market assignment)');
+    log.info('OrderbookAgent запущен (ожидает назначения рынка)');
   }
 
   switchMarket(market: ActiveMarketContext): void {
@@ -46,7 +46,7 @@ export class OrderbookAgent extends EventEmitter {
 
     log.info(
       { conditionId: market.conditionId },
-      'OrderbookAgent switched market',
+      'OrderbookAgent переключён на рынок',
     );
   }
 
@@ -74,19 +74,19 @@ export class OrderbookAgent extends EventEmitter {
 
   private connectMarket(): void {
     if (!this.alive || !this.market) return;
-    log.info('Connecting to Polymarket market WebSocket');
+    log.info('Подключение к WebSocket рынка');
 
     this.marketWs = new WebSocket(CONFIG.WS_MARKET_URL);
 
     this.marketWs.on('open', () => {
-      log.info('Market WebSocket connected');
+      log.info('WebSocket рынка подключён');
       const sub = JSON.stringify({
         assets_ids: [this.market!.yesTokenId, this.market!.noTokenId],
         type: 'market',
         custom_feature_enabled: true,
       });
       this.marketWs!.send(sub);
-      log.info('Subscribed to market channel');
+      log.info('Подписка на канал рынка');
     });
 
     this.marketWs.on('message', (raw: Buffer) => {
@@ -104,24 +104,24 @@ export class OrderbookAgent extends EventEmitter {
     });
 
     this.marketWs.on('close', (code: number) => {
-      log.warn({ code }, 'Market WebSocket closed');
+      log.warn({ code }, 'WebSocket рынка закрыт');
       this.scheduleReconnect(() => this.connectMarket());
     });
 
     this.marketWs.on('error', (err: Error) => {
-      log.error({ err: err.message }, 'Market WebSocket error');
+      log.error({ err: err.message }, 'Ошибка WebSocket рынка');
     });
   }
 
   private connectUser(): void {
     if (CONFIG.DRY_RUN) return;
     if (!this.alive || !this.market) return;
-    log.info('Connecting to Polymarket user WebSocket');
+    log.info('Подключение к пользовательскому WebSocket');
 
     this.userWs = new WebSocket(CONFIG.WS_USER_URL);
 
     this.userWs.on('open', () => {
-      log.info('User WebSocket connected');
+      log.info('Пользовательский WebSocket подключён');
       const sub = JSON.stringify({
         auth: {
           apiKey: CONFIG.API_KEY,
@@ -132,7 +132,7 @@ export class OrderbookAgent extends EventEmitter {
         type: 'user',
       });
       this.userWs!.send(sub);
-      log.info('Subscribed to user channel');
+      log.info('Подписка на пользовательский канал');
     });
 
     this.userWs.on('message', (raw: Buffer) => {
@@ -149,12 +149,12 @@ export class OrderbookAgent extends EventEmitter {
     });
 
     this.userWs.on('close', (code: number) => {
-      log.warn({ code }, 'User WebSocket closed');
+      log.warn({ code }, 'Пользовательский WebSocket закрыт');
       this.scheduleReconnect(() => this.connectUser());
     });
 
     this.userWs.on('error', (err: Error) => {
-      log.error({ err: err.message }, 'User WebSocket error');
+      log.error({ err: err.message }, 'Ошибка пользовательского WebSocket');
     });
   }
 
@@ -194,7 +194,7 @@ export class OrderbookAgent extends EventEmitter {
           size: (msg as any).size,
           status: (msg as any).status,
         },
-        'Trade fill received',
+        'Ордер исполнен',
       );
       this.emit('fill', msg);
     }

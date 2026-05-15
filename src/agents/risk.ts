@@ -44,7 +44,7 @@ export class RiskAgent extends EventEmitter {
   // Call once at startup to begin the midnight reset cycle
   startDailyReset(): void {
     this.scheduleMidnightReset();
-    log.info({ cap: CONFIG.DAILY_SPEND_CAP }, 'Daily spend cap armed');
+    log.info({ cap: CONFIG.DAILY_SPEND_CAP }, 'Дневной лимит расходов активирован');
   }
 
   // Record USDC spent on any order (call before submitting)
@@ -52,7 +52,7 @@ export class RiskAgent extends EventEmitter {
     if (this.dailySpendUsdc + usdcAmount > CONFIG.DAILY_SPEND_CAP) {
       log.warn(
         { spent: this.dailySpendUsdc.toFixed(2), attempted: usdcAmount.toFixed(2), cap: CONFIG.DAILY_SPEND_CAP },
-        'Daily spend cap would be exceeded — blocking order',
+        'Дневной лимит будет превышен — ордер заблокирован',
       );
       return false; // caller must not submit
     }
@@ -75,7 +75,7 @@ export class RiskAgent extends EventEmitter {
       if (next >= CONFIG.INVENTORY_HOLD_MAX_CYCLES) {
         stale.push(id);
         this.inventoryCycles.delete(id);
-        log.warn({ orderId: id, cycles: next }, 'Inventory hold limit reached — cancelling order');
+        log.warn({ orderId: id, cycles: next }, 'Превышен лимит удержания позиции — отмена ордера');
       } else {
         this.inventoryCycles.set(id, next);
       }
@@ -96,7 +96,7 @@ export class RiskAgent extends EventEmitter {
 
     this.midnightResetTimer = setTimeout(() => {
       this.dailySpendUsdc = 0;
-      log.info({ resetAt: new Date().toISOString() }, 'Daily spend counter reset at UTC midnight');
+      log.info({ resetAt: new Date().toISOString() }, 'Дневной счётчик сброшен в полночь UTC');
       this.emit('daily_reset');
       this.scheduleMidnightReset(); // reschedule for next day
     }, msUntilMidnight);
@@ -131,7 +131,7 @@ export class RiskAgent extends EventEmitter {
         netDelta: this.position.netDelta.toFixed(2),
         realizedPnl: this.position.realizedPnl.toFixed(4),
       },
-      'Position updated',
+      'Позиция обновлена',
     );
 
     this.emit('position_update', this.position);
@@ -150,7 +150,7 @@ export class RiskAgent extends EventEmitter {
     if (this.halted) return RiskAction.HALT;
 
     if (this.dailySpendUsdc >= CONFIG.DAILY_SPEND_CAP) {
-      log.warn({ spent: this.dailySpendUsdc.toFixed(2), cap: CONFIG.DAILY_SPEND_CAP }, 'Daily spend cap reached — HALT');
+      log.warn({ spent: this.dailySpendUsdc.toFixed(2), cap: CONFIG.DAILY_SPEND_CAP }, 'Дневной лимит достигнут — СТОП');
       this.halted = true;
       this.emit('halt', 'daily_spend_cap');
       return RiskAction.HALT;
@@ -160,7 +160,7 @@ export class RiskAgent extends EventEmitter {
     const totalPnl = this.position.realizedPnl + this.position.unrealizedPnl;
 
     if (totalPnl < -CONFIG.MAX_LOSS) {
-      log.error({ totalPnl }, 'Max loss breached — HALTING');
+      log.error({ totalPnl }, 'Превышен макс. убыток — СТОП');
       this.halted = true;
       this.emit('halt', 'max_loss_breached');
       return RiskAction.HALT;
@@ -168,12 +168,12 @@ export class RiskAgent extends EventEmitter {
 
     const notional = absPosition * (quote.fairValue || 0.5);
     if (notional > CONFIG.MAX_NOTIONAL) {
-      log.warn({ notional }, 'Max notional exceeded — REDUCE_ONLY');
+      log.warn({ notional }, 'Превышен макс. нотионал — только снижение позиции');
       return RiskAction.REDUCE_ONLY;
     }
 
     if (absPosition > CONFIG.MAX_POSITION) {
-      log.warn({ absPosition }, 'Max position exceeded — REDUCE_ONLY');
+      log.warn({ absPosition }, 'Превышена макс. позиция — только снижение позиции');
       return RiskAction.REDUCE_ONLY;
     }
 
@@ -202,7 +202,7 @@ export class RiskAgent extends EventEmitter {
 
   unhalt(): void {
     this.halted = false;
-    log.info('Risk halt cleared');
+    log.info('Риск-стоп снят');
   }
 
   stop(): void {
@@ -219,7 +219,7 @@ export class RiskAgent extends EventEmitter {
       realizedPnl: 0,
     };
     this.halted = false;
-    log.info('Position reset for new market');
+    log.info('Позиция сброшена для нового рынка');
     this.emit('position_update', this.position);
   }
 

@@ -59,16 +59,16 @@ export class Btc15MinStrategy implements MarketStrategy {
       const events = await this.fetchEvents();
       const market = this.pickNextActiveMarket(events);
       if (!market) {
-        log.info('No active BTC 15m market with future expiry found');
+        log.info('Активный BTC 15m рынок не найден');
         return null;
       }
       log.info(
         { conditionId: market.conditionId, expiresAt: new Date(market.expiresAt).toISOString(), question: market.description },
-        'Discovered active market',
+        'Активный рынок найден',
       );
       return market;
     } catch (err) {
-      log.error({ err }, 'Market discovery failed');
+      log.error({ err }, 'Ошибка поиска рынка');
       return null;
     }
   }

@@ -34,7 +34,7 @@ function createStrategy(): MarketStrategy {
 }
 
 async function main() {
-  log.info('=== Polymarket Maker Bot Starting ===');
+  log.info('=== PolyBot запускается ===');
   log.info(
     {
       wallet: CONFIG.WALLET_ADDRESS,
@@ -43,7 +43,7 @@ async function main() {
       strategy: CONFIG.MARKET_STRATEGY,
       eventSlug: CONFIG.EVENT_SLUG,
     },
-    'Configuration loaded',
+    'Конфигурация загружена',
   );
 
   const wallet = CONFIG.DRY_RUN
@@ -55,7 +55,7 @@ async function main() {
       `Wallet address mismatch: derived ${wallet.address}, expected ${CONFIG.WALLET_ADDRESS}`,
     );
   }
-  log.info(CONFIG.DRY_RUN ? '[DRY_RUN] Random wallet created — no real funds used' : 'Wallet verified');
+  log.info(CONFIG.DRY_RUN ? '[СИМУЛЯЦИЯ] Тестовый кошелёк создан — реальные средства не используются' : 'Кошелёк проверен');
 
   const strategy = createStrategy();
   const marketManager = new MarketManager(strategy);
@@ -78,7 +78,7 @@ async function main() {
       const { current } = ev;
       log.info(
         { conditionId: current.conditionId, description: current.description },
-        'Market rotation triggered',
+        'Ротация рынка',
       );
 
       // Save data for previous market before switching
@@ -120,7 +120,7 @@ async function main() {
 
     const riskAction = risk.checkQuote(quote);
     if (riskAction === RiskAction.HALT) {
-      log.warn('Risk HALT — cancelling all');
+      log.warn('Риск СТОП — отмена всех ордеров');
       execution.cancelAll();
       return;
     }
@@ -151,11 +151,11 @@ async function main() {
 
   // --- GhostFillDetector events ---
   ghostFill.on('ghost_fill', (ev: GhostFillEvent) => {
-    log.warn(ev, 'Ghost fill detected — CLOB fill not confirmed onchain');
+    log.warn(ev, 'Ghost fill: CLOB исполнение не подтверждено на блокчейне');
   });
 
   ghostFill.on('unmatched_residual', (ev: UnmatchedResidualEvent) => {
-    log.warn(ev, 'Unmatched residual after ghost fill recovery — manual intervention may be needed');
+    log.warn(ev, 'Остаток после ghost fill recovery — требуется ручное вмешательство');
   });
 
   orderbook.on('order_update', (msg: any) => {
@@ -171,12 +171,12 @@ async function main() {
   });
 
   risk.on('halt', (reason: string) => {
-    log.error({ reason }, 'RISK HALT — cancelling all orders');
+    log.error({ reason }, 'РИСК СТОП — отмена всех ордеров');
     execution.cancelAll();
   });
 
   risk.on('daily_reset', () => {
-    log.info({ cap: CONFIG.DAILY_SPEND_CAP }, 'Daily spend counter reset — trading unblocked');
+    log.info({ cap: CONFIG.DAILY_SPEND_CAP }, 'Дневной счётчик сброшен — торговля разблокирована');
     risk.unhalt();
   });
 
@@ -206,39 +206,39 @@ async function main() {
   takerSweep.on('signal', (sig: TakerSignal) => {
     log.info(
       { combined: sig.combined.toFixed(4), edge: (sig.edge * 100).toFixed(2) + '%' },
-      'Taker signal emitted',
+      'Taker сигнал обнаружен',
     );
   });
   takerSweep.on('sweep_complete', (ev: any) => {
-    log.info(ev, 'Taker sweep complete — merged to USDC');
+    log.info(ev, 'Taker sweep выполнен — позиция смёрджена в USDC');
   });
   takerSweep.on('partial_fill', (ev: any) => {
-    log.warn(ev, 'Partial FAK fill — one side missed');
+    log.warn(ev, 'Частичное FAK исполнение — одна сторона не заполнена');
   });
   takerSweep.on('sweep_miss', () => {
-    log.debug('Taker sweep missed — both FAK orders expired unfilled');
+    log.debug('Taker sweep пропущен — оба FAK ордера истекли без исполнения');
   });
 
   // --- CtfSplitMode events ---
   ctfSplit.on('entered', (ev: any) => {
-    log.info(ev, 'CTF split position entered');
+    log.info(ev, 'CTF Split позиция открыта');
   });
   ctfSplit.on('yes_sold', (ev: any) => {
-    log.info(ev, 'CTF split YES sold — NO held to resolution');
+    log.info(ev, 'CTF Split YES продан — NO удерживается до резолюции');
   });
   ctfSplit.on('force_exit', (ev: any) => {
-    log.warn(ev, 'CTF split force-exit triggered');
+    log.warn(ev, 'CTF Split принудительный выход');
   });
   ctfSplit.on('redeemed', (ev: any) => {
-    log.info(ev, 'CTF split redeemed winning tokens');
+    log.info(ev, 'CTF Split токены погашены');
   });
 
   // --- LadderMode events ---
   ladder.on('placed', (ev: any) => {
-    log.info({ count: ev.levels.length }, 'Ladder orders placed');
+    log.info({ count: ev.levels.length }, 'Ladder ордера выставлены');
   });
   ladder.on('fill', (ev: any) => {
-    log.info(ev, 'Ladder level filled');
+    log.info(ev, 'Ladder уровень исполнен');
   });
 
   // --- Startup sequence ---
@@ -250,11 +250,11 @@ async function main() {
   ghostFill.start();
   await marketManager.start();
 
-  log.info('=== All agents running ===');
+  log.info('=== Все агенты запущены ===');
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
-    log.info({ signal }, 'Shutting down...');
+    log.info({ signal }, 'Завершение работы...');
     marketManager.stop();
     marketData.stop();
     orderbook.stop();
@@ -263,12 +263,12 @@ async function main() {
     risk.stop();
     // Force-exit CTF split YES position if held
     if (ctfSplit.heldShares > 0) {
-      log.info({ shares: ctfSplit.heldShares }, 'Shutdown: force-exiting CTF split YES position');
+      log.info({ shares: ctfSplit.heldShares }, 'Завершение: принудительный выход из CTF Split YES');
       await ctfSplit.tick(orderbook.yesOrderbook).catch(() => {});
     }
     await execution.cancelAll();
     execution.stop();
-    log.info('Shutdown complete');
+    log.info('Завершение выполнено');
     process.exit(0);
   };
 

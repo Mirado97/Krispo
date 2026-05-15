@@ -69,7 +69,7 @@ export class ExecutionAgent extends EventEmitter {
 
   async init(): Promise<void> {
     if (CONFIG.DRY_RUN) {
-      log.info('[DRY_RUN] ExecutionAgent initialized — no real orders will be placed');
+      log.info('[СИМУЛЯЦИЯ] ExecutionAgent инициализирован — ордера не выставляются');
       return;
     }
     this.startHeartbeat();
@@ -79,7 +79,7 @@ export class ExecutionAgent extends EventEmitter {
   async setMarket(market: ActiveMarketContext): Promise<void> {
     this.market = market;
     if (CONFIG.DRY_RUN) {
-      log.info({ conditionId: market.conditionId }, '[DRY_RUN] Market set (no cancel/fee fetch)');
+      log.info({ conditionId: market.conditionId }, '[СИМУЛЯЦИЯ] Рынок установлен');
       return;
     }
     await this.cancelAll();
@@ -100,7 +100,7 @@ export class ExecutionAgent extends EventEmitter {
     if (CONFIG.DRY_RUN) {
       log.debug(
         { bid: quote.bidPrice.toFixed(4), ask: quote.askPrice.toFixed(4), fv: quote.fairValue.toFixed(4), spread: (quote.spread * 10000).toFixed(0) + 'bps' },
-        '[DRY_RUN] would cancelAndReplace',
+        '[СИМУЛЯЦИЯ] выставить котировки',
       );
       return { cycleMs: 0, signMs: 0, cancelMs: 0, submitMs: 0 };
     }
@@ -137,7 +137,7 @@ export class ExecutionAgent extends EventEmitter {
 
       log.info(
         { cycleMs: cycleMs.toFixed(1), signMs: signMs.toFixed(1), submitMs: submitMs.toFixed(1), bid: quote.bidPrice, ask: quote.askPrice },
-        'Cancel/replace cycle complete',
+        'Цикл cancel/replace выполнен',
       );
 
       this.emit('cycle_complete', { cycleMs, signMs, cancelMs, submitMs });
@@ -153,7 +153,7 @@ export class ExecutionAgent extends EventEmitter {
 
   async cancelOrder(orderId: string): Promise<void> {
     if (CONFIG.DRY_RUN) {
-      log.info({ orderId }, '[DRY_RUN] would cancelOrder');
+      log.info({ orderId }, '[СИМУЛЯЦИЯ] отмена ордера');
       return;
     }
     try {
@@ -190,7 +190,7 @@ export class ExecutionAgent extends EventEmitter {
       for (const lvl of levels) {
         log.info(
           { price: lvl.price.toFixed(4), size: lvl.size.toFixed(2) },
-          '[DRY_RUN] would place ladder BUY',
+          '[СИМУЛЯЦИЯ] выставить Ladder BUY',
         );
       }
       return levels.map(() => null);
@@ -231,7 +231,7 @@ export class ExecutionAgent extends EventEmitter {
     if (CONFIG.DRY_RUN) {
       log.info(
         { yesAsk: yesAskPrice.toFixed(4), noAsk: noAskPrice.toFixed(4), combined: (yesAskPrice + noAskPrice).toFixed(4), size: sizeEach },
-        '[DRY_RUN] would submitFakPair (taker sweep)',
+        '[СИМУЛЯЦИЯ] Taker Sweep FAK пара',
       );
       return { yesFilled: sizeEach, noFilled: sizeEach, yesOrderId: null, noOrderId: null };
     }

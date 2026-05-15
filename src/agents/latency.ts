@@ -45,7 +45,7 @@ export class LatencyMonitor {
     this.cycleCount++;
 
     if (data.cycleMs > 100) {
-      log.warn({ cycleMs: data.cycleMs.toFixed(1) }, 'Cancel/replace cycle exceeded 100ms');
+      log.warn({ cycleMs: data.cycleMs.toFixed(1) }, 'Цикл cancel/replace превысил 100мс');
     }
   }
 
@@ -69,7 +69,7 @@ export class LatencyMonitor {
         submitMs: this.metrics.submitLatencyMs.toFixed(1),
         binanceMs: this.metrics.binanceLatencyMs.toFixed(1),
       },
-      'Latency report',
+      'Отчёт по задержкам',
     );
   }
 }

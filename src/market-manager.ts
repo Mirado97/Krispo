@@ -37,7 +37,7 @@ export class MarketManager extends EventEmitter {
     );
     log.info(
       { strategy: this.strategy.name, intervalMs: this.strategy.discoveryIntervalMs },
-      'MarketManager started',
+      'MarketManager запущен',
     );
   }
 
@@ -71,18 +71,18 @@ export class MarketManager extends EventEmitter {
     const tte = this.getTimeToExpiryMs();
 
     if (tte <= 0 || !this.current) {
-      log.info('Current market expired or missing, discovering next...');
+      log.info('Текущий рынок истёк, ищем следующий...');
       await this.discoverAndSwitch();
       return;
     }
 
     if (tte < this.strategy.discoveryIntervalMs * 2) {
-      log.info({ tteMs: tte }, 'Market expiring soon, pre-fetching next...');
+      log.info({ tteMs: tte }, 'Рынок скоро истекает, предзагрузка следующего...');
       const next = await this.strategy.discoverActiveMarket();
       if (next && next.conditionId !== this.current.conditionId) {
         log.info(
           { next: next.description, expiresAt: new Date(next.expiresAt).toISOString() },
-          'Next market pre-fetched, will switch on expiry',
+          'Следующий рынок найден, переключение по истечении',
         );
       }
     }
@@ -91,7 +91,7 @@ export class MarketManager extends EventEmitter {
   private async discoverAndSwitch(): Promise<void> {
     const market = await this.strategy.discoverActiveMarket();
     if (!market) {
-      log.warn('No active market found');
+      log.warn('Активный рынок не найден');
       return;
     }
 
@@ -113,7 +113,7 @@ export class MarketManager extends EventEmitter {
         expiresAt: new Date(market.expiresAt).toISOString(),
         strikePrice,
       },
-      'Switched to new market',
+      'Переключение на новый рынок',
     );
 
     this.emit('market_switch', {
@@ -125,6 +125,6 @@ export class MarketManager extends EventEmitter {
   updateStrikePrice(btcPrice: number): void {
     if (!this.current || this.current.strikePrice > 0) return;
     this.current.strikePrice = btcPrice;
-    log.info({ strikePrice: btcPrice }, 'Strike price locked from BTC feed');
+    log.info({ strikePrice: btcPrice }, 'Страйк зафиксирован по BTC');
   }
 }
