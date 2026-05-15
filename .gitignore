@@ -4,3 +4,4 @@ dist/
 *.log
 vol-calibration-cache.json
 vol-data.jsonl
+DEPLOY.md
