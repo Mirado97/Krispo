@@ -31,14 +31,11 @@ async function main() {
     process.exit(1);
   }
 
-  const sigType = parseInt(process.env.SIGNATURE_TYPE || '0', 10);
   const wallet = new Wallet(pk);
-  const proxyAddress = process.env.PROXY_ADDRESS || wallet.address;
-  const useProxy = sigType !== 0 && proxyAddress !== wallet.address;
-
-  console.log(`Wallet (EOA):    ${wallet.address}`);
-  console.log(`Proxy address:   ${proxyAddress}`);
-  console.log(`Signature type:  ${sigType}`);
+  // L1 auth always uses EOA — same as official @polymarket/clob-client
+  console.log(`Wallet address: ${wallet.address}`);
+  console.log(`Proxy address:  ${process.env.PROXY_ADDRESS || '(none, EOA mode)'}`);
+  console.log(`Signature type: ${process.env.SIGNATURE_TYPE || '0'}`);
 
   // Get server time
   const timeResp = await fetch(`${CLOB_URL}/time`);
@@ -48,9 +45,8 @@ async function main() {
 
   const nonce = 0;
   const domain = { name: 'ClobAuthDomain', version: '1', chainId: CHAIN_ID };
-  // Message address = proxy when using proxy, EOA otherwise
   const value = {
-    address: useProxy ? proxyAddress : wallet.address,
+    address: wallet.address,
     timestamp,
     nonce,
     message: 'This message attests that I control the given wallet',
@@ -58,23 +54,17 @@ async function main() {
 
   const signature = await wallet.signTypedData(domain, CLOB_AUTH_TYPES, value);
 
-  // For POLY_PROXY: POLY_ADDRESS=EOA, POLY_PROXY_ADDRESS=proxy
-  // For EOA: POLY_ADDRESS=EOA only
-  const buildHeaders = () => {
-    const h: Record<string, string> = {
-      'POLY_ADDRESS': wallet.address,
-      'POLY_SIGNATURE': signature,
-      'POLY_TIMESTAMP': timestamp,
-      'POLY_NONCE': nonce.toString(),
-    };
-    if (useProxy) h['POLY_PROXY_ADDRESS'] = proxyAddress;
-    return h;
+  const headers = {
+    'POLY_ADDRESS': wallet.address,
+    'POLY_SIGNATURE': signature,
+    'POLY_TIMESTAMP': timestamp,
+    'POLY_NONCE': nonce.toString(),
   };
 
   // Try derive first
   const deriveResp = await fetch(`${CLOB_URL}/auth/derive-api-key`, {
     method: 'GET',
-    headers: buildHeaders(),
+    headers,
   });
 
   if (deriveResp.ok) {
@@ -87,7 +77,7 @@ async function main() {
   console.log('No existing credentials, creating new...');
   const createResp = await fetch(`${CLOB_URL}/auth/api-key`, {
     method: 'POST',
-    headers: buildHeaders(),
+    headers,
   });
 
   if (!createResp.ok) {
