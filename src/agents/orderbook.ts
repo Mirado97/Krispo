@@ -90,16 +90,16 @@ export class OrderbookAgent extends EventEmitter {
     });
 
     this.marketWs.on('message', (raw: Buffer) => {
-      const recvTs = performance.now();
+      const recvWallMs = Date.now();
       try {
         const msg = JSON.parse(raw.toString());
         if (Array.isArray(msg)) {
-          msg.forEach((m) => this.handleMarketMsg(m, recvTs));
+          msg.forEach((m) => this.handleMarketMsg(m, recvWallMs));
         } else {
-          this.handleMarketMsg(msg as PolymarketMarketMsg, recvTs);
+          this.handleMarketMsg(msg as PolymarketMarketMsg, recvWallMs);
         }
       } catch (err) {
-        log.error({ err }, 'Failed to parse market WS message');
+        log.error({ err }, 'Ошибка парсинга сообщения рынка');
       }
     });
 
@@ -158,17 +158,19 @@ export class OrderbookAgent extends EventEmitter {
     });
   }
 
-  private handleMarketMsg(msg: PolymarketMarketMsg, recvTs: number): void {
+  private handleMarketMsg(msg: PolymarketMarketMsg, recvWallMs: number): void {
     if (!this.market) return;
 
     if (msg.event_type === 'book') {
-      const book = this.parseBook(msg.bids, msg.asks, parseInt(msg.timestamp));
+      const msgTsMs = parseInt(msg.timestamp) * 1000; // Polymarket timestamp in seconds
+      const networkLatencyMs = msgTsMs > 0 ? recvWallMs - msgTsMs : 0;
+      const book = this.parseBook(msg.bids, msg.asks, recvWallMs);
       if (msg.asset_id === this.market.yesTokenId) {
         this.yesBook = book;
       } else if (msg.asset_id === this.market.noTokenId) {
         this.noBook = book;
       }
-      this.emit('book_update', { assetId: msg.asset_id, book, recvTs });
+      this.emit('book_update', { assetId: msg.asset_id, book, networkLatencyMs });
     }
 
     if (msg.event_type === 'price_change') {
@@ -177,7 +179,7 @@ export class OrderbookAgent extends EventEmitter {
           pc.asset_id === this.market.yesTokenId ? this.yesBook : this.noBook;
         this.applyPriceChange(target, pc);
       }
-      this.emit('price_change', { msg, recvTs });
+      this.emit('price_change', { msg, recvWallMs });
     }
 
     if (msg.event_type === 'last_trade_price') {

@@ -94,7 +94,7 @@ export class MarketDataAgent extends EventEmitter {
       price,
       timestamp: ts,
       volatility: this.annualizedVol,
-      latencyMs: recvTs,
+      latencyMs: Date.now() - ts,  // real network latency: our clock vs Binance server timestamp
     });
   }
 

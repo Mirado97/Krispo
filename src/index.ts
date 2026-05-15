@@ -104,7 +104,7 @@ async function main() {
   // --- MarketDataAgent → QuotingAgent + MarketManager ---
   marketData.on('price', (data: { price: number; volatility: number; latencyMs: number }) => {
     quoting.updateMarketData(data.price, data.volatility);
-    latency.recordBinanceLatency(performance.now() - data.latencyMs);
+    latency.recordBinanceLatency(data.latencyMs);
 
     marketManager.updateStrikePrice(data.price);
 
@@ -187,8 +187,8 @@ async function main() {
   });
 
   // --- OrderbookAgent book updates → LatencyMonitor + TakerSweep anomaly check ---
-  orderbook.on('book_update', (data: { recvTs: number }) => {
-    latency.recordPolymarketWsLatency(performance.now() - data.recvTs);
+  orderbook.on('book_update', (data: { networkLatencyMs: number }) => {
+    if (data.networkLatencyMs > 0) latency.recordPolymarketWsLatency(data.networkLatencyMs);
 
     const tte = marketManager.getTimeToExpiryMs();
     const circuitBreaker = tte > 0 && tte < CONFIG.CIRCUIT_BREAKER_SEC * 1000;
