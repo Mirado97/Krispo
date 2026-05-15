@@ -58,6 +58,7 @@ export class LatencyMonitor {
   }
 
   private logMetrics(): void {
+    if (this.cycleCount === 0) return;
     log.info(
       {
         cycles: this.cycleCount,

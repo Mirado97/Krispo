@@ -10,7 +10,7 @@ export const logger = pino({
         options: {
           colorize: true,
           translateTime: 'HH:MM:ss',
-          ignore: 'pid,hostname',
+          ignore: 'pid,hostname,agent',
           messageFormat: '{agent}: {msg}',
         },
       }
