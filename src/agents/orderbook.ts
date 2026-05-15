@@ -162,7 +162,7 @@ export class OrderbookAgent extends EventEmitter {
     if (!this.market) return;
 
     if (msg.event_type === 'book') {
-      const msgTsMs = parseInt(msg.timestamp) * 1000; // Polymarket timestamp in seconds
+      const msgTsMs = parseInt(msg.timestamp); // Polymarket timestamp already in ms
       const networkLatencyMs = msgTsMs > 0 ? recvWallMs - msgTsMs : 0;
       const book = this.parseBook(msg.bids, msg.asks, recvWallMs);
       if (msg.asset_id === this.market.yesTokenId) {
@@ -179,6 +179,8 @@ export class OrderbookAgent extends EventEmitter {
           pc.asset_id === this.market.yesTokenId ? this.yesBook : this.noBook;
         this.applyPriceChange(target, pc);
       }
+      // price_change has no server timestamp — emit with 0 latency so index.ts still fires
+      this.emit('book_update', { assetId: msg.market, book: this.yesBook, networkLatencyMs: 0 });
       this.emit('price_change', { msg, recvWallMs });
     }
 
