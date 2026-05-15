@@ -70,10 +70,6 @@ export class LadderMode extends EventEmitter {
     // Combined cap check: even the top level must not make the pair too expensive
     const combined = yesAsk + noAsk;
     if (combined > CONFIG.LADDER_MAX_COMBINED) {
-      log.debug(
-        { combined: combined.toFixed(4), cap: CONFIG.LADDER_MAX_COMBINED },
-        'Ladder: combined cap exceeded — skip',
-      );
       return;
     }
 
