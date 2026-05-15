@@ -26,7 +26,7 @@ export const CONFIG = {
   PRIVATE_KEY: requireEnv('PRIVATE_KEY'),
   WALLET_ADDRESS: requireEnv('WALLET_ADDRESS'),
   PROXY_ADDRESS: requireEnv('PROXY_ADDRESS'),
-  SIGNATURE_TYPE: 2, // GNOSIS_SAFE (required for proxy wallet)
+  SIGNATURE_TYPE: envInt('SIGNATURE_TYPE', 2), // 0=EOA, 2=GNOSIS_SAFE
 
   // API credentials
   API_KEY: requireEnv('POLY_API_KEY'),
