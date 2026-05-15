@@ -15,6 +15,7 @@ import { TakerSweepMode } from './modes/taker-sweep.js';
 import { CtfSplitMode } from './modes/ctf-split.js';
 import { LadderMode } from './modes/ladder.js';
 import { onMarketStart, onMarketEnd } from './utils/vol-collector.js';
+import { PaperTrader } from './simulation/paper-trader.js';
 import type { MarketStrategy } from './strategies/types.js';
 import type { ActiveMarketContext } from './strategies/types.js';
 import type { GhostFillEvent, UnmatchedResidualEvent } from './types.js';
@@ -70,6 +71,8 @@ async function main() {
   const takerSweep = new TakerSweepMode(execution, wallet);
   const ctfSplit = new CtfSplitMode(execution, wallet);
   const ladder = new LadderMode(execution, risk);
+  const paperTrader = CONFIG.DRY_RUN ? new PaperTrader() : null;
+  let currentFairValue = 0.5;
 
   // --- Market rotation wiring ---
   marketManager.on(
@@ -111,6 +114,7 @@ async function main() {
     if (tte < marketManager.quotingCutoffMs) return;
 
     const fairValue = marketManager.computeFairValue(data.price, data.volatility, tte);
+    currentFairValue = fairValue;
     takerSweep.updateFairValue(fairValue);
     ctfSplit.update(fairValue, data.volatility, tte);
     ladder.updateFairValue(fairValue);
@@ -127,6 +131,8 @@ async function main() {
 
     const adjustedQuote = risk.applyRiskAdjustment(quote, riskAction);
     if (adjustedQuote.bidSize <= 0 && adjustedQuote.askSize <= 0) return;
+
+    if (paperTrader) paperTrader.updateQuote(adjustedQuote.bidPrice, adjustedQuote.askPrice, adjustedQuote.bidSize, adjustedQuote.askSize);
 
     execution.cancelAndReplace(adjustedQuote).then((timings) => {
       if (timings.cycleMs > 0) latency.recordCycle(timings);
@@ -192,6 +198,8 @@ async function main() {
       ctfSplit.tick(orderbook.yesOrderbook).catch((err) => log.error({ err }, 'ctfSplit.tick failed'));
       return;
     }
+
+    if (paperTrader) paperTrader.checkFills(orderbook.yesOrderbook, currentFairValue);
 
     const signal = takerSweep.checkAnomalies(orderbook.yesOrderbook, orderbook.noOrderbook);
     if (signal) {
