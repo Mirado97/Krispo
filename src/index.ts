@@ -3,22 +3,31 @@ import { CONFIG } from './config.js';
 import { logger } from './utils/logger.js';
 import { MarketManager } from './market-manager.js';
 import { Btc5MinStrategy } from './strategies/btc-5min.js';
+import { Btc15MinStrategy } from './strategies/btc-15min.js';
 import { MarketDataAgent } from './agents/market-data.js';
 import { OrderbookAgent } from './agents/orderbook.js';
 import { QuotingAgent } from './agents/quoting.js';
 import { ExecutionAgent } from './agents/execution.js';
 import { RiskAgent, RiskAction } from './agents/risk.js';
 import { LatencyMonitor } from './agents/latency.js';
+import { GhostFillDetector } from './ctf/ghost-fill.js';
+import { TakerSweepMode } from './modes/taker-sweep.js';
+import { CtfSplitMode } from './modes/ctf-split.js';
+import { LadderMode } from './modes/ladder.js';
+import { onMarketStart, onMarketEnd } from './utils/vol-collector.js';
 import type { MarketStrategy } from './strategies/types.js';
 import type { ActiveMarketContext } from './strategies/types.js';
+import type { GhostFillEvent, UnmatchedResidualEvent } from './types.js';
+import type { TakerSignal } from './modes/taker-sweep.js';
 
 const log = logger.child({ agent: 'Orchestrator' });
 
 function createStrategy(): MarketStrategy {
   switch (CONFIG.MARKET_STRATEGY) {
     case 'btc-5min':
-      // EVENT_SLUG: specific event (e.g. btc-updown-5m-1771697400) or empty for series discovery
       return new Btc5MinStrategy(CONFIG.EVENT_SLUG || '');
+    case 'btc-15min':
+      return new Btc15MinStrategy(CONFIG.EVENT_SLUG || '');
     default:
       throw new Error(`Unknown strategy: ${CONFIG.MARKET_STRATEGY}`);
   }
@@ -37,13 +46,16 @@ async function main() {
     'Configuration loaded',
   );
 
-  const wallet = new Wallet(CONFIG.PRIVATE_KEY);
-  if (wallet.address.toLowerCase() !== CONFIG.WALLET_ADDRESS.toLowerCase()) {
+  const wallet = CONFIG.DRY_RUN
+    ? new Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80')
+    : new Wallet(CONFIG.PRIVATE_KEY);
+
+  if (!CONFIG.DRY_RUN && wallet.address.toLowerCase() !== CONFIG.WALLET_ADDRESS.toLowerCase()) {
     throw new Error(
       `Wallet address mismatch: derived ${wallet.address}, expected ${CONFIG.WALLET_ADDRESS}`,
     );
   }
-  log.info('Wallet verified');
+  log.info(CONFIG.DRY_RUN ? '[DRY_RUN] Random wallet created — no real funds used' : 'Wallet verified');
 
   const strategy = createStrategy();
   const marketManager = new MarketManager(strategy);
@@ -54,6 +66,10 @@ async function main() {
   const execution = new ExecutionAgent(wallet);
   const risk = new RiskAgent();
   const latency = new LatencyMonitor();
+  const ghostFill = new GhostFillDetector(wallet);
+  const takerSweep = new TakerSweepMode(execution, wallet);
+  const ctfSplit = new CtfSplitMode(execution, wallet);
+  const ladder = new LadderMode(execution, risk);
 
   // --- Market rotation wiring ---
   marketManager.on(
@@ -65,12 +81,20 @@ async function main() {
         'Market rotation triggered',
       );
 
+      // Save data for previous market before switching
+      if (ev.prev) onMarketEnd(marketData.btcPrice);
+      onMarketStart(current.conditionId, current.description, marketData.annualizedVol, marketData.btcPrice);
+
       risk.resetForNewMarket();
       quoting.resetForNewMarket();
       quoting.setTickSize(current.tickSize);
 
       await execution.setMarket(current);
       orderbook.switchMarket(current);
+      ghostFill.setMarket(current.conditionId, current.yesTokenId, current.noTokenId);
+      takerSweep.setMarket(current);
+      ctfSplit.setMarket(current);
+      ladder.setMarket(current);
     },
   );
 
@@ -87,6 +111,10 @@ async function main() {
     if (tte < marketManager.quotingCutoffMs) return;
 
     const fairValue = marketManager.computeFairValue(data.price, data.volatility, tte);
+    takerSweep.updateFairValue(fairValue);
+    ctfSplit.update(fairValue, data.volatility, tte);
+    ladder.updateFairValue(fairValue);
+
     const quote = quoting.computeQuote(fairValue);
     if (!quote) return;
 
@@ -105,7 +133,7 @@ async function main() {
     });
   });
 
-  // --- OrderbookAgent fills → RiskAgent + ExecutionAgent ---
+  // --- OrderbookAgent fills → RiskAgent + ExecutionAgent + GhostFillDetector ---
   orderbook.on('fill', (msg: any) => {
     const side = msg.side as string;
     const price = parseFloat(msg.price);
@@ -113,8 +141,21 @@ async function main() {
     risk.processFill(side, price, size);
 
     for (const maker of msg.maker_orders || []) {
-      execution.handleFill(maker.order_id, parseFloat(maker.matched_amount), side);
+      const filledAmount = parseFloat(maker.matched_amount);
+      execution.handleFill(maker.order_id, filledAmount, side);
+      ladder.handleFill(maker.order_id, filledAmount);
+      const fillSide: 'YES' | 'NO' = side === 'BUY' ? 'YES' : 'NO';
+      ghostFill.recordFill(maker.order_id, fillSide, filledAmount);
     }
+  });
+
+  // --- GhostFillDetector events ---
+  ghostFill.on('ghost_fill', (ev: GhostFillEvent) => {
+    log.warn(ev, 'Ghost fill detected — CLOB fill not confirmed onchain');
+  });
+
+  ghostFill.on('unmatched_residual', (ev: UnmatchedResidualEvent) => {
+    log.warn(ev, 'Unmatched residual after ghost fill recovery — manual intervention may be needed');
   });
 
   orderbook.on('order_update', (msg: any) => {
@@ -134,16 +175,79 @@ async function main() {
     execution.cancelAll();
   });
 
-  // --- OrderbookAgent book updates → LatencyMonitor ---
+  risk.on('daily_reset', () => {
+    log.info({ cap: CONFIG.DAILY_SPEND_CAP }, 'Daily spend counter reset — trading unblocked');
+    risk.unhalt();
+  });
+
+  // --- OrderbookAgent book updates → LatencyMonitor + TakerSweep anomaly check ---
   orderbook.on('book_update', (data: { recvTs: number }) => {
     latency.recordPolymarketWsLatency(performance.now() - data.recvTs);
+
+    const tte = marketManager.getTimeToExpiryMs();
+    const circuitBreaker = tte > 0 && tte < CONFIG.CIRCUIT_BREAKER_SEC * 1000;
+
+    if (circuitBreaker) {
+      // All speculative modes blocked — only CTF Split can force-exit
+      ctfSplit.tick(orderbook.yesOrderbook).catch((err) => log.error({ err }, 'ctfSplit.tick failed'));
+      return;
+    }
+
+    const signal = takerSweep.checkAnomalies(orderbook.yesOrderbook, orderbook.noOrderbook);
+    if (signal) {
+      takerSweep.executeSwap(signal).catch((err) => log.error({ err }, 'executeSwap failed'));
+    }
+
+    ctfSplit.tick(orderbook.yesOrderbook).catch((err) => log.error({ err }, 'ctfSplit.tick failed'));
+    ladder.tick(orderbook.yesOrderbook, orderbook.noOrderbook).catch((err) => log.error({ err }, 'ladder.tick failed'));
+  });
+
+  // --- TakerSweepMode events ---
+  takerSweep.on('signal', (sig: TakerSignal) => {
+    log.info(
+      { combined: sig.combined.toFixed(4), edge: (sig.edge * 100).toFixed(2) + '%' },
+      'Taker signal emitted',
+    );
+  });
+  takerSweep.on('sweep_complete', (ev: any) => {
+    log.info(ev, 'Taker sweep complete — merged to USDC');
+  });
+  takerSweep.on('partial_fill', (ev: any) => {
+    log.warn(ev, 'Partial FAK fill — one side missed');
+  });
+  takerSweep.on('sweep_miss', () => {
+    log.debug('Taker sweep missed — both FAK orders expired unfilled');
+  });
+
+  // --- CtfSplitMode events ---
+  ctfSplit.on('entered', (ev: any) => {
+    log.info(ev, 'CTF split position entered');
+  });
+  ctfSplit.on('yes_sold', (ev: any) => {
+    log.info(ev, 'CTF split YES sold — NO held to resolution');
+  });
+  ctfSplit.on('force_exit', (ev: any) => {
+    log.warn(ev, 'CTF split force-exit triggered');
+  });
+  ctfSplit.on('redeemed', (ev: any) => {
+    log.info(ev, 'CTF split redeemed winning tokens');
+  });
+
+  // --- LadderMode events ---
+  ladder.on('placed', (ev: any) => {
+    log.info({ count: ev.levels.length }, 'Ladder orders placed');
+  });
+  ladder.on('fill', (ev: any) => {
+    log.info(ev, 'Ladder level filled');
   });
 
   // --- Startup sequence ---
   await execution.init();
+  risk.startDailyReset();
   marketData.start();
   orderbook.start();
   latency.start();
+  ghostFill.start();
   await marketManager.start();
 
   log.info('=== All agents running ===');
@@ -155,6 +259,13 @@ async function main() {
     marketData.stop();
     orderbook.stop();
     latency.stop();
+    ghostFill.stop();
+    risk.stop();
+    // Force-exit CTF split YES position if held
+    if (ctfSplit.heldShares > 0) {
+      log.info({ shares: ctfSplit.heldShares }, 'Shutdown: force-exiting CTF split YES position');
+      await ctfSplit.tick(orderbook.yesOrderbook).catch(() => {});
+    }
     await execution.cancelAll();
     execution.stop();
     log.info('Shutdown complete');

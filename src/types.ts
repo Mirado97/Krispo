@@ -208,3 +208,25 @@ export interface CancelResponse {
   canceled: string[];
   not_canceled: Record<string, string>;
 }
+
+export interface CtfPosition {
+  conditionId: string;
+  yesTokenId: string;
+  noTokenId: string;
+  yesBalance: number;
+  noBalance: number;
+  entryUsdcCost: number;
+}
+
+export interface GhostFillEvent {
+  orderId: string;
+  side: 'YES' | 'NO';
+  expected: number;
+  received: number;
+}
+
+export interface UnmatchedResidualEvent {
+  yesBalance: number;
+  noBalance: number;
+  conditionId: string;
+}

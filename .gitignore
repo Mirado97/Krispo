@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 *.log
+vol-calibration-cache.json
+vol-data.jsonl

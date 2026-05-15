@@ -22,12 +22,86 @@ export class RiskAgent extends EventEmitter {
   };
   private halted = false;
 
+  // Daily spend tracking
+  private dailySpendUsdc = 0;
+  private midnightResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Per-order inventory hold cycle counter (orderId → tick count)
+  private inventoryCycles = new Map<string, number>();
+
   get currentPosition(): Position {
     return { ...this.position };
   }
 
   get isHalted(): boolean {
     return this.halted;
+  }
+
+  get dailySpend(): number {
+    return this.dailySpendUsdc;
+  }
+
+  // Call once at startup to begin the midnight reset cycle
+  startDailyReset(): void {
+    this.scheduleMidnightReset();
+    log.info({ cap: CONFIG.DAILY_SPEND_CAP }, 'Daily spend cap armed');
+  }
+
+  // Record USDC spent on any order (call before submitting)
+  recordSpend(usdcAmount: number): boolean {
+    if (this.dailySpendUsdc + usdcAmount > CONFIG.DAILY_SPEND_CAP) {
+      log.warn(
+        { spent: this.dailySpendUsdc.toFixed(2), attempted: usdcAmount.toFixed(2), cap: CONFIG.DAILY_SPEND_CAP },
+        'Daily spend cap would be exceeded — blocking order',
+      );
+      return false; // caller must not submit
+    }
+    this.dailySpendUsdc += usdcAmount;
+    log.debug({ daily: this.dailySpendUsdc.toFixed(2), cap: CONFIG.DAILY_SPEND_CAP }, 'Spend recorded');
+    return true;
+  }
+
+  // Register an active order for inventory hold tracking
+  trackOrder(orderId: string): void {
+    this.inventoryCycles.set(orderId, 0);
+  }
+
+  // Increment all tracked order cycle counters.
+  // Returns IDs of orders that exceeded INVENTORY_HOLD_MAX_CYCLES and should be cancelled.
+  tickInventoryCycles(): string[] {
+    const stale: string[] = [];
+    for (const [id, cycles] of this.inventoryCycles) {
+      const next = cycles + 1;
+      if (next >= CONFIG.INVENTORY_HOLD_MAX_CYCLES) {
+        stale.push(id);
+        this.inventoryCycles.delete(id);
+        log.warn({ orderId: id, cycles: next }, 'Inventory hold limit reached — cancelling order');
+      } else {
+        this.inventoryCycles.set(id, next);
+      }
+    }
+    return stale;
+  }
+
+  clearTrackedOrder(orderId: string): void {
+    this.inventoryCycles.delete(orderId);
+  }
+
+  private scheduleMidnightReset(): void {
+    const now = new Date();
+    const nextMidnightUtc = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0),
+    );
+    const msUntilMidnight = nextMidnightUtc.getTime() - Date.now();
+
+    this.midnightResetTimer = setTimeout(() => {
+      this.dailySpendUsdc = 0;
+      log.info({ resetAt: new Date().toISOString() }, 'Daily spend counter reset at UTC midnight');
+      this.emit('daily_reset');
+      this.scheduleMidnightReset(); // reschedule for next day
+    }, msUntilMidnight);
+
+    log.debug({ msUntilMidnight, nextReset: nextMidnightUtc.toISOString() }, 'Midnight reset scheduled');
   }
 
   /**
@@ -74,6 +148,13 @@ export class RiskAgent extends EventEmitter {
    */
   checkQuote(quote: Quote): RiskAction {
     if (this.halted) return RiskAction.HALT;
+
+    if (this.dailySpendUsdc >= CONFIG.DAILY_SPEND_CAP) {
+      log.warn({ spent: this.dailySpendUsdc.toFixed(2), cap: CONFIG.DAILY_SPEND_CAP }, 'Daily spend cap reached — HALT');
+      this.halted = true;
+      this.emit('halt', 'daily_spend_cap');
+      return RiskAction.HALT;
+    }
 
     const absPosition = Math.abs(this.position.netDelta);
     const totalPnl = this.position.realizedPnl + this.position.unrealizedPnl;
@@ -122,6 +203,10 @@ export class RiskAgent extends EventEmitter {
   unhalt(): void {
     this.halted = false;
     log.info('Risk halt cleared');
+  }
+
+  stop(): void {
+    if (this.midnightResetTimer) clearTimeout(this.midnightResetTimer);
   }
 
   resetForNewMarket(): void {

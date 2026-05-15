@@ -68,13 +68,21 @@ export class ExecutionAgent extends EventEmitter {
   }
 
   async init(): Promise<void> {
+    if (CONFIG.DRY_RUN) {
+      log.info('[DRY_RUN] ExecutionAgent initialized — no real orders will be placed');
+      return;
+    }
     this.startHeartbeat();
     log.info('ExecutionAgent initialized (waiting for market assignment)');
   }
 
   async setMarket(market: ActiveMarketContext): Promise<void> {
-    await this.cancelAll();
     this.market = market;
+    if (CONFIG.DRY_RUN) {
+      log.info({ conditionId: market.conditionId }, '[DRY_RUN] Market set (no cancel/fee fetch)');
+      return;
+    }
+    await this.cancelAll();
     await this.fetchFeeRate();
     log.info(
       { conditionId: market.conditionId, feeRateBps: this.feeRateBps },
@@ -87,9 +95,17 @@ export class ExecutionAgent extends EventEmitter {
   }
 
   async cancelAndReplace(quote: Quote): Promise<{ cycleMs: number; signMs: number; cancelMs: number; submitMs: number }> {
-    if (this.cancelInFlight || !this.market) {
+    if (!this.market) return { cycleMs: 0, signMs: 0, cancelMs: 0, submitMs: 0 };
+
+    if (CONFIG.DRY_RUN) {
+      log.info(
+        { bid: quote.bidPrice.toFixed(4), ask: quote.askPrice.toFixed(4), fv: quote.fairValue.toFixed(4), spread: (quote.spread * 10000).toFixed(0) + 'bps' },
+        '[DRY_RUN] would cancelAndReplace',
+      );
       return { cycleMs: 0, signMs: 0, cancelMs: 0, submitMs: 0 };
     }
+
+    if (this.cancelInFlight) return { cycleMs: 0, signMs: 0, cancelMs: 0, submitMs: 0 };
 
     this.cancelInFlight = true;
     const cycleStart = performance.now();
@@ -135,13 +151,144 @@ export class ExecutionAgent extends EventEmitter {
     }
   }
 
+  async cancelOrder(orderId: string): Promise<void> {
+    if (CONFIG.DRY_RUN) {
+      log.info({ orderId }, '[DRY_RUN] would cancelOrder');
+      return;
+    }
+    try {
+      await this.httpRequest('DELETE', '/cancel', JSON.stringify({ orderId }));
+      log.info({ orderId }, 'Order cancelled');
+    } catch (err) {
+      log.error({ err, orderId }, 'Failed to cancel order');
+    }
+  }
+
   async cancelAll(): Promise<void> {
+    if (CONFIG.DRY_RUN) {
+      this.active = { bidOrderId: null, askOrderId: null, bidPrice: 0, askPrice: 0, bidSize: 0, askSize: 0 };
+      return;
+    }
     try {
       await this.httpRequest('DELETE', '/cancel-all');
       this.active = { bidOrderId: null, askOrderId: null, bidPrice: 0, askPrice: 0, bidSize: 0, askSize: 0 };
       log.info('All orders cancelled');
     } catch (err) {
       log.error({ err }, 'Failed to cancel all');
+    }
+  }
+
+  // Submit a batch of GTC BUY limit orders at different price levels (ladder).
+  // Returns array of order IDs for each level (null if level was skipped or failed).
+  async submitLadderOrders(
+    tokenId: string,
+    levels: Array<{ price: number; size: number }>,
+  ): Promise<Array<string | null>> {
+    if (!this.market) return levels.map(() => null);
+
+    if (CONFIG.DRY_RUN) {
+      for (const lvl of levels) {
+        log.info(
+          { price: lvl.price.toFixed(4), size: lvl.size.toFixed(2) },
+          '[DRY_RUN] would place ladder BUY',
+        );
+      }
+      return levels.map(() => null);
+    }
+
+    const signed = await Promise.all(
+      levels.map((lvl) => this.signNewOrder(tokenId, Side.BUY, lvl.price, lvl.size)),
+    );
+
+    const payloads = signed.map((s) => buildOrderPayload(s, 'GTC'));
+    const body = JSON.stringify(payloads);
+
+    try {
+      const results = await this.httpRequest<OrderResponse[]>('POST', '/orders', body);
+      return (results ?? []).map((r) => r?.orderID ?? null);
+    } catch (err) {
+      log.error({ err }, 'Ladder batch submission failed, falling back to sequential');
+      const ids: Array<string | null> = [];
+      for (const payload of payloads) {
+        const r = await this.submitSingle(payload);
+        ids.push(r?.orderID ?? null);
+      }
+      return ids;
+    }
+  }
+
+  // Submit a FAK (Fill-And-Kill) pair: BUY YES + BUY NO simultaneously.
+  // Returns filled amounts for each side, or [0, 0] on dry run.
+  async submitFakPair(
+    yesTokenId: string,
+    noTokenId: string,
+    yesAskPrice: number,
+    noAskPrice: number,
+    sizeEach: number,
+  ): Promise<{ yesFilled: number; noFilled: number; yesOrderId: string | null; noOrderId: string | null }> {
+    if (!this.market) return { yesFilled: 0, noFilled: 0, yesOrderId: null, noOrderId: null };
+
+    if (CONFIG.DRY_RUN) {
+      log.info(
+        { yesAsk: yesAskPrice.toFixed(4), noAsk: noAskPrice.toFixed(4), combined: (yesAskPrice + noAskPrice).toFixed(4), size: sizeEach },
+        '[DRY_RUN] would submitFakPair (taker sweep)',
+      );
+      return { yesFilled: sizeEach, noFilled: sizeEach, yesOrderId: null, noOrderId: null };
+    }
+
+    const [signedYes, signedNo] = await Promise.all([
+      this.signNewOrder(yesTokenId, Side.BUY, yesAskPrice, sizeEach),
+      this.signNewOrder(noTokenId, Side.BUY, noAskPrice, sizeEach),
+    ]);
+
+    const yesPayload = buildOrderPayload(signedYes, 'FAK');
+    const noPayload = buildOrderPayload(signedNo, 'FAK');
+    const body = JSON.stringify([yesPayload, noPayload]);
+
+    try {
+      const results = await this.httpRequest<OrderResponse[]>('POST', '/orders', body);
+      const yesRes = results?.[0] ?? null;
+      const noRes = results?.[1] ?? null;
+
+      log.info(
+        { yesOrderId: yesRes?.orderID, noOrderId: noRes?.orderID, combined: (yesAskPrice + noAskPrice).toFixed(4) },
+        'FAK pair submitted',
+      );
+
+      return {
+        yesFilled: yesRes?.success ? sizeEach : 0,
+        noFilled: noRes?.success ? sizeEach : 0,
+        yesOrderId: yesRes?.orderID ?? null,
+        noOrderId: noRes?.orderID ?? null,
+      };
+    } catch (err) {
+      log.error({ err }, 'FAK pair submission failed');
+      return { yesFilled: 0, noFilled: 0, yesOrderId: null, noOrderId: null };
+    }
+  }
+
+  // Submit a single FAK SELL — used by CTF Split mode to exit YES position
+  async submitFakSell(
+    tokenId: string,
+    bidPrice: number,
+    size: number,
+    label = 'FAK sell',
+  ): Promise<{ filled: number; orderId: string | null }> {
+    if (!this.market) return { filled: 0, orderId: null };
+
+    if (CONFIG.DRY_RUN) {
+      log.info({ tokenId: tokenId.slice(0, 8) + '...', bid: bidPrice.toFixed(4), size }, `[DRY_RUN] would ${label}`);
+      return { filled: size, orderId: null };
+    }
+
+    try {
+      const signed = await this.signNewOrder(tokenId, Side.SELL, bidPrice, size);
+      const payload = buildOrderPayload(signed, 'FAK');
+      const result = await this.httpRequest<OrderResponse>('POST', '/order', JSON.stringify(payload));
+      return { filled: result?.success ? size : 0, orderId: result?.orderID ?? null };
+    } catch (err) {
+      log.error({ err }, `${label} failed`);
+      return { filled: 0, orderId: null };
     }
   }
 

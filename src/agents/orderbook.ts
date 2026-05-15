@@ -60,7 +60,12 @@ export class OrderbookAgent extends EventEmitter {
     [this.marketWs, this.userWs].forEach((ws) => {
       if (ws) {
         ws.removeAllListeners();
-        ws.close();
+        // Avoid "WebSocket was closed before connection established" error
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
+          ws.close();
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          ws.terminate();
+        }
       }
     });
     this.marketWs = null;
@@ -109,6 +114,7 @@ export class OrderbookAgent extends EventEmitter {
   }
 
   private connectUser(): void {
+    if (CONFIG.DRY_RUN) return;
     if (!this.alive || !this.market) return;
     log.info('Connecting to Polymarket user WebSocket');
 
