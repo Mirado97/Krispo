@@ -7,7 +7,8 @@ import { getCtfBalance, mergePositions } from './merge.js';
 const log = childLogger('GhostFillDetector');
 
 // How long to wait before declaring a fill "ghost" (network delay tolerance)
-const GHOST_WAIT_MS = 30_000;
+// Polymarket V2 on-chain settlement can take 2+ minutes after CLOB fill
+const GHOST_WAIT_MS = 120_000;
 // Max CLOB sell attempts for unmatched side
 const SELL_RETRIES = 3;
 
@@ -109,12 +110,12 @@ export class GhostFillDetector extends EventEmitter {
     const mergeable = Math.min(yesBal, noBal);
 
     if (mergeable > 0.01) {
-      try {
-        await mergePositions(this.wallet, this.conditionId, mergeable);
-        log.info({ merged: mergeable }, 'Ghost fill recovery: merged paired shares');
-      } catch (err) {
-        log.error({ err }, 'Ghost fill recovery: merge failed');
-      }
+      // mergePositions requires on-chain tx from deposit wallet (SIGNATURE_TYPE=3).
+      // Not implemented for deposit wallet — log only, no auto-merge.
+      log.warn(
+        { mergeable, conditionId: this.conditionId },
+        'Ghost fill recovery: paired shares available but auto-merge not supported for deposit wallet — merge manually via Polymarket UI',
+      );
     }
 
     // Emit so orchestrator can decide what to do with the remaining unpaired side
