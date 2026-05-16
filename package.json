@@ -16,7 +16,8 @@
     "place-and-revert": "tsx src/scripts/place-and-revert.ts",
     "setup-approvals": "tsx src/scripts/setup-approvals.ts",
     "setup-deposit-wallet": "tsx src/scripts/setup-deposit-wallet.ts",
-    "recover-proxy": "tsx src/scripts/recover-proxy-usdc.ts"
+    "recover-proxy": "tsx src/scripts/recover-proxy-usdc.ts",
+    "wrap-usdc": "tsx src/scripts/wrap-usdc.ts"
   },
   "dependencies": {
     "@polymarket/builder-relayer-client": "^0.0.8",
