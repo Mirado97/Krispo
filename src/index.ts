@@ -4,6 +4,7 @@ import { logger } from './utils/logger.js';
 import { MarketManager } from './market-manager.js';
 import { Btc5MinStrategy } from './strategies/btc-5min.js';
 import { Btc15MinStrategy } from './strategies/btc-15min.js';
+import { VolumeMakerStrategy } from './strategies/volume-maker.js';
 import { MarketDataAgent } from './agents/market-data.js';
 import { OrderbookAgent } from './agents/orderbook.js';
 import { QuotingAgent } from './agents/quoting.js';
@@ -29,6 +30,8 @@ function createStrategy(): MarketStrategy {
       return new Btc5MinStrategy(CONFIG.EVENT_SLUG || '');
     case 'btc-15min':
       return new Btc15MinStrategy(CONFIG.EVENT_SLUG || '');
+    case 'volume-maker':
+      return new VolumeMakerStrategy();
     default:
       throw new Error(`Unknown strategy: ${CONFIG.MARKET_STRATEGY}`);
   }
