@@ -15,12 +15,12 @@ const UNIT = 10n ** BigInt(CONFIG.AMOUNT_DECIMALS);
 async function ensureUsdcApproval(wallet: Wallet, amount: bigint): Promise<void> {
   if (CONFIG.DRY_RUN) return;
 
-  const usdc = new Contract(CONFIG.USDC_E_ADDRESS, ERC20_ABI, getCtfProvider());
+  const usdc = new Contract(CONFIG.PUSD_ADDRESS, ERC20_ABI, getCtfProvider());
   const allowance: bigint = await usdc.allowance(CONFIG.PROXY_ADDRESS, CONFIG.CTF_TOKEN_ADDRESS);
 
   if (allowance >= amount) return;
 
-  log.info({ current: allowance.toString(), needed: amount.toString() }, 'Approving USDC for CTF');
+  log.info({ current: allowance.toString(), needed: amount.toString() }, 'Approving pUSD for CTF');
 
   const data = ERC20_IFACE.encodeFunctionData('approve', [
     CONFIG.CTF_TOKEN_ADDRESS,
@@ -28,7 +28,7 @@ async function ensureUsdcApproval(wallet: Wallet, amount: bigint): Promise<void>
     2n ** 256n - 1n,
   ]);
 
-  await execSafeCall(wallet, CONFIG.USDC_E_ADDRESS, data, 'approve USDC for CTF');
+  await execSafeCall(wallet, CONFIG.PUSD_ADDRESS, data, 'approve pUSD for CTF');
 }
 
 export async function splitPosition(
@@ -40,18 +40,18 @@ export async function splitPosition(
 
   log.info(
     { conditionId, usdcAmount, amountRaw: amount.toString() },
-    'splitPosition — USDC → YES+NO',
+    'splitPosition — pUSD → YES+NO',
   );
 
   await ensureUsdcApproval(wallet, amount);
 
   const data = CTF_IFACE.encodeFunctionData('splitPosition', [
-    CONFIG.USDC_E_ADDRESS,
+    CONFIG.PUSD_ADDRESS,
     ZeroHash,
     conditionId,
     PARTITION,
     amount,
   ]);
 
-  return execSafeCall(wallet, CONFIG.CTF_TOKEN_ADDRESS, data, `split ${usdcAmount} USDC`);
+  return execSafeCall(wallet, CONFIG.CTF_TOKEN_ADDRESS, data, `split ${usdcAmount} pUSD`);
 }

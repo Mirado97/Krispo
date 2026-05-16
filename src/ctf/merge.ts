@@ -10,7 +10,7 @@ const CTF_IFACE = new Interface(CTF_ABI);
 
 // YES=1, NO=2 partition used by all Polymarket binary markets
 const PARTITION = [1n, 2n];
-const UNIT = 10n ** BigInt(CONFIG.AMOUNT_DECIMALS); // 1e6 for USDC
+const UNIT = 10n ** BigInt(CONFIG.AMOUNT_DECIMALS); // 1e6 for pUSD
 
 export async function mergePositions(
   wallet: Wallet,
@@ -21,11 +21,11 @@ export async function mergePositions(
 
   log.info(
     { conditionId, sharesAmount, amountRaw: amount.toString() },
-    'mergePositions — YES+NO → USDC',
+    'mergePositions — YES+NO → pUSD',
   );
 
   const data = CTF_IFACE.encodeFunctionData('mergePositions', [
-    CONFIG.USDC_E_ADDRESS,
+    CONFIG.PUSD_ADDRESS,
     ZeroHash,
     conditionId,
     PARTITION,

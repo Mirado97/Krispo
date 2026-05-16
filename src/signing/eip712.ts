@@ -2,20 +2,20 @@ import { Wallet } from 'ethers';
 import { CONFIG } from '../config.js';
 import { type RawOrder, type SignedOrder, Side } from '../types.js';
 
+// V2 order struct — 11 fields (taker/expiration/nonce/feeRateBps removed, timestamp/metadata/builder added)
 const ORDER_EIP712_TYPES = {
   Order: [
     { name: 'salt', type: 'uint256' },
     { name: 'maker', type: 'address' },
     { name: 'signer', type: 'address' },
-    { name: 'taker', type: 'address' },
     { name: 'tokenId', type: 'uint256' },
     { name: 'makerAmount', type: 'uint256' },
     { name: 'takerAmount', type: 'uint256' },
-    { name: 'expiration', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'feeRateBps', type: 'uint256' },
     { name: 'side', type: 'uint8' },
     { name: 'signatureType', type: 'uint8' },
+    { name: 'timestamp', type: 'uint256' },
+    { name: 'metadata', type: 'bytes32' },
+    { name: 'builder', type: 'bytes32' },
   ],
 };
 
@@ -41,7 +41,7 @@ function getExchangeDomain(negRisk: boolean) {
   if (!domain) {
     domain = {
       name: 'Polymarket CTF Exchange',
-      version: '1',
+      version: '2',
       chainId: CONFIG.CHAIN_ID,
       verifyingContract: contract,
     };
@@ -71,32 +71,32 @@ export function buildOrderAmounts(
   return { makerAmount: makerAmt.toString(), takerAmount: takerAmt.toString() };
 }
 
+const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
+
 export interface BuildOrderParams {
   tokenId: string;
   side: Side;
   price: number;
   size: number;
-  feeRateBps: string;
   negRisk: boolean;
-  expiration?: number;
 }
 
 export function buildOrder(params: BuildOrderParams): RawOrder {
-  const { tokenId, side, price, size, feeRateBps, expiration = 0 } = params;
+  const { tokenId, side, price, size } = params;
   const { makerAmount, takerAmount } = buildOrderAmounts(side, price, size);
+  const sigType = CONFIG.SIGNATURE_TYPE;
   return {
     salt: generateSalt(),
-    maker: CONFIG.SIGNATURE_TYPE === 0 ? CONFIG.WALLET_ADDRESS : CONFIG.PROXY_ADDRESS,
-    signer: CONFIG.WALLET_ADDRESS,
-    taker: CONFIG.ZERO_ADDRESS,
+    maker: sigType === 0 ? CONFIG.WALLET_ADDRESS : CONFIG.PROXY_ADDRESS,
+    signer: sigType === 3 ? CONFIG.PROXY_ADDRESS : CONFIG.WALLET_ADDRESS,
     tokenId,
     makerAmount,
     takerAmount,
-    expiration: expiration.toString(),
-    nonce: '0',
-    feeRateBps,
     side,
-    signatureType: CONFIG.SIGNATURE_TYPE,
+    signatureType: sigType,
+    timestamp: Date.now().toString(),
+    metadata: ZERO_BYTES32,
+    builder: ZERO_BYTES32,
   };
 }
 
@@ -105,6 +105,11 @@ export async function signOrder(
   order: RawOrder,
   negRisk: boolean,
 ): Promise<SignedOrder> {
+  if (order.signatureType === 3) {
+    // POLY_1271: requires ERC-7739 wrapped signature for deposit wallet.
+    // Use @polymarket/clob-client-v2 for this — not yet implemented here.
+    throw new Error('POLY_1271 signing not yet implemented. Use SIGNATURE_TYPE=0 (EOA) or install @polymarket/clob-client-v2.');
+  }
   const domain = getExchangeDomain(negRisk);
   const signature = await wallet.signTypedData(domain, ORDER_EIP712_TYPES, order);
   return { ...order, signature };

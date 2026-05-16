@@ -25,15 +25,15 @@ function buildOrderPayload(signed: SignedOrder, orderType: string) {
       salt: parseInt(signed.salt, 10),
       maker: signed.maker,
       signer: signed.signer,
-      taker: signed.taker,
+      taker: CONFIG.ZERO_ADDRESS,
       tokenId: signed.tokenId,
       makerAmount: signed.makerAmount,
       takerAmount: signed.takerAmount,
       side: SIDE_STR[signed.side],
-      expiration: signed.expiration,
-      nonce: signed.nonce,
-      feeRateBps: signed.feeRateBps,
       signatureType: signed.signatureType,
+      timestamp: signed.timestamp,
+      metadata: signed.metadata,
+      builder: signed.builder,
       signature: signed.signature,
     },
     owner: CONFIG.API_KEY,
@@ -45,7 +45,6 @@ function buildOrderPayload(signed: SignedOrder, orderType: string) {
 export class ExecutionAgent extends EventEmitter {
   private wallet: Wallet;
   private market: ActiveMarketContext | null = null;
-  private feeRateBps = '0';
   private active: ActiveOrders = {
     bidOrderId: null,
     askOrderId: null,
@@ -83,11 +82,7 @@ export class ExecutionAgent extends EventEmitter {
       return;
     }
     await this.cancelAll();
-    await this.fetchFeeRate();
-    log.info(
-      { conditionId: market.conditionId, feeRateBps: this.feeRateBps },
-      'ExecutionAgent switched market',
-    );
+    log.info({ conditionId: market.conditionId }, 'ExecutionAgent switched market');
   }
 
   stop(): void {
@@ -310,15 +305,7 @@ export class ExecutionAgent extends EventEmitter {
     size: number,
   ): Promise<SignedOrder> {
     const negRisk = this.market?.negRisk ?? false;
-    const params: BuildOrderParams = {
-      tokenId,
-      side,
-      price,
-      size,
-      feeRateBps: this.feeRateBps,
-      negRisk,
-    };
-    const order = buildOrder(params);
+    const order = buildOrder({ tokenId, side, price, size, negRisk });
     return signOrder(this.wallet, order, negRisk);
   }
 
@@ -365,21 +352,6 @@ export class ExecutionAgent extends EventEmitter {
     } catch (err) {
       log.error({ err }, 'Single order submission failed');
       return null;
-    }
-  }
-
-  private async fetchFeeRate(): Promise<void> {
-    if (!this.market) return;
-    try {
-      const resp = await fetch(
-        `${CONFIG.CLOB_URL}/fee-rate?token_id=${this.market.yesTokenId}`,
-      );
-      const data = (await resp.json()) as { fee_rate_bps?: string; base_fee?: number };
-      this.feeRateBps = data.fee_rate_bps ?? '0';
-      log.info({ feeRateBps: this.feeRateBps }, 'Fetched fee rate');
-    } catch (err) {
-      log.warn({ err }, 'Failed to fetch fee rate, defaulting to 0');
-      this.feeRateBps = '0';
     }
   }
 

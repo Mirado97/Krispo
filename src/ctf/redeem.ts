@@ -18,7 +18,7 @@ export async function redeemPositions(
   log.info({ conditionId, indexSets }, 'redeemPositions');
 
   const data = CTF_IFACE.encodeFunctionData('redeemPositions', [
-    CONFIG.USDC_E_ADDRESS,
+    CONFIG.PUSD_ADDRESS,
     ZeroHash,
     conditionId,
     indexSets.map(BigInt),

@@ -20,22 +20,24 @@ const NEG_RISK = process.env.NEG_RISK === 'true';
 
 const EXCHANGE = CONFIG.exchangeAddress(NEG_RISK);
 
+// V2 order struct — 11 fields
 const ORDER_EIP712_TYPES = {
   Order: [
     { name: 'salt', type: 'uint256' },
     { name: 'maker', type: 'address' },
     { name: 'signer', type: 'address' },
-    { name: 'taker', type: 'address' },
     { name: 'tokenId', type: 'uint256' },
     { name: 'makerAmount', type: 'uint256' },
     { name: 'takerAmount', type: 'uint256' },
-    { name: 'expiration', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'feeRateBps', type: 'uint256' },
     { name: 'side', type: 'uint8' },
     { name: 'signatureType', type: 'uint8' },
+    { name: 'timestamp', type: 'uint256' },
+    { name: 'metadata', type: 'bytes32' },
+    { name: 'builder', type: 'bytes32' },
   ],
 };
+
+const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
 function buildL2Headers(method: string, path: string, body: string = '') {
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -59,61 +61,56 @@ async function main() {
   console.log('Condition ID:', CONDITION_ID);
   console.log('Exchange:', EXCHANGE);
 
-  // Step 1: Get fee rate
-  console.log('\n--- Step 1: Fee rate ---');
-  const feeResp = await fetch(`${CLOB_URL}/fee-rate?token_id=${YES_TOKEN_ID}`);
-  const feeData = await feeResp.json() as { fee_rate_bps?: string; base_fee?: number };
-  console.log('Fee data:', feeData);
-  const feeRateBps = feeData.fee_rate_bps ?? '0';
-
-  // Step 2: Build a small test order
+  // Build a small test order (V2 struct, 11 fields)
   // BUY 5 YES tokens at $0.01 each (smallest possible, costs $0.05)
   const price = 0.01;
   const size = 5;
   const side = 0; // BUY
 
-  const makerAmount = Math.floor(price * size * UNIT).toString(); // USDC amount
-  const takerAmount = Math.floor(size * UNIT).toString(); // token amount
+  const makerAmount = Math.floor(price * size * UNIT).toString();
+  const takerAmount = Math.floor(size * UNIT).toString();
 
   const saltBytes = randomBytes(32);
   const salt = BigInt('0x' + Buffer.from(saltBytes).toString('hex')).toString();
 
+  const sigType = CONFIG.SIGNATURE_TYPE;
   const order = {
     salt,
-    maker: CONFIG.PROXY_ADDRESS,
-    signer: CONFIG.WALLET_ADDRESS,
-    taker: CONFIG.ZERO_ADDRESS,
+    maker: sigType === 0 ? CONFIG.WALLET_ADDRESS : CONFIG.PROXY_ADDRESS,
+    signer: sigType === 3 ? CONFIG.PROXY_ADDRESS : CONFIG.WALLET_ADDRESS,
     tokenId: YES_TOKEN_ID,
     makerAmount,
     takerAmount,
-    expiration: '0',
-    nonce: '0',
-    feeRateBps,
     side,
-    signatureType: CONFIG.SIGNATURE_TYPE,
+    signatureType: sigType,
+    timestamp: Date.now().toString(),
+    metadata: ZERO_BYTES32,
+    builder: ZERO_BYTES32,
   };
 
-  console.log('\n--- Step 2: Order ---');
+  console.log('\n--- Step 1: Order ---');
   console.log('Price:', price, '| Size:', size, '| Side: BUY');
-  console.log('Maker amount (USDC):', makerAmount, `(${parseInt(makerAmount) / UNIT} USDC)`);
+  console.log('Maker amount (pUSD):', makerAmount, `($${parseInt(makerAmount) / UNIT})`);
   console.log('Taker amount (tokens):', takerAmount, `(${parseInt(takerAmount) / UNIT} tokens)`);
 
-  // Step 3: Sign the order
-  console.log('\n--- Step 3: Signing ---');
+  // Step 2: Sign the order (V2 domain)
+  console.log('\n--- Step 2: Signing ---');
   const domain = {
     name: 'Polymarket CTF Exchange',
-    version: '1',
+    version: '2',
     chainId: CONFIG.CHAIN_ID,
     verifyingContract: EXCHANGE,
   };
   const signature = await wallet.signTypedData(domain, ORDER_EIP712_TYPES, order);
   console.log('Signature:', signature.substring(0, 20) + '...');
 
-  // Step 4: Submit the order
-  console.log('\n--- Step 4: Submitting ---');
+  // Step 3: Submit the order
+  console.log('\n--- Step 3: Submitting ---');
   const payload = {
     order: {
       ...order,
+      salt: parseInt(order.salt, 10),
+      taker: CONFIG.ZERO_ADDRESS,
       side: 'BUY',
       signature,
     },

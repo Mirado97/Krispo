@@ -117,7 +117,7 @@ interface DiscoveredMarket {
 async function checkOnChainBalances(provider: JsonRpcProvider) {
   console.log('\n--- Step 1: On-chain balances ---');
 
-  const usdc = new Contract(CONFIG.USDC_E_ADDRESS, ERC20_ABI, provider);
+  const usdc = new Contract(CONFIG.PUSD_ADDRESS, ERC20_ABI, provider);
 
   const [walletPolRaw, walletUsdcRaw, proxyUsdcRaw] = await Promise.all([
     provider.getBalance(CONFIG.WALLET_ADDRESS),
@@ -131,9 +131,9 @@ async function checkOnChainBalances(provider: JsonRpcProvider) {
 
   console.log(`  Wallet ${CONFIG.WALLET_ADDRESS}:`);
   console.log(`    POL:    ${walletPol.toFixed(4)}`);
-  console.log(`    USDC.e: $${walletUsdc.toFixed(2)}`);
+  console.log(`    pUSD:   $${walletUsdc.toFixed(2)}`);
   console.log(`  Proxy  ${CONFIG.PROXY_ADDRESS}:`);
-  console.log(`    USDC.e: $${proxyUsdc.toFixed(2)}`);
+  console.log(`    pUSD:   $${proxyUsdc.toFixed(2)}`);
 
   return { walletPol, walletUsdc, proxyUsdc };
 }
@@ -141,27 +141,39 @@ async function checkOnChainBalances(provider: JsonRpcProvider) {
 async function checkExchangeAllowances(provider: JsonRpcProvider) {
   console.log('\n--- Step 2: Exchange allowances ---');
 
-  const usdc = new Contract(CONFIG.USDC_E_ADDRESS, ERC20_ABI, provider);
+  // For SIGNATURE_TYPE=0 (EOA), the maker IS the wallet address — check its allowances.
+  // For SIGNATURE_TYPE=1/2 (proxy), check the proxy address allowances.
+  const makerAddr = CONFIG.SIGNATURE_TYPE === 0 ? CONFIG.WALLET_ADDRESS : CONFIG.PROXY_ADDRESS;
+
+  const usdc = new Contract(CONFIG.PUSD_ADDRESS, ERC20_ABI, provider);
   const ctf = new Contract(CONFIG.CTF_TOKEN_ADDRESS, CTF_ABI, provider);
 
   const exchangeAddr = CONFIG.exchangeAddress(false);
 
   const [usdcAllowance, ctfApproved] = await Promise.all([
-    usdc.allowance(CONFIG.PROXY_ADDRESS, exchangeAddr),
-    ctf.isApprovedForAll(CONFIG.PROXY_ADDRESS, exchangeAddr),
+    usdc.allowance(makerAddr, exchangeAddr),
+    ctf.isApprovedForAll(makerAddr, exchangeAddr),
   ]);
 
   const usdcAllowanceFormatted = parseFloat(formatUnits(usdcAllowance, 6));
+  console.log(`  Maker address (sig_type=${CONFIG.SIGNATURE_TYPE}): ${makerAddr}`);
   console.log(`  USDC.e allowance for exchange: $${usdcAllowanceFormatted.toFixed(2)}`);
   console.log(`  CTF approved for exchange:     ${ctfApproved}`);
 
   if (usdcAllowanceFormatted === 0) {
-    console.log('  [!] Proxy has zero USDC.e allowance for the exchange.');
-    console.log('      If order placement fails, approve via Polymarket web interface.');
+    console.log('  [!] Maker has zero USDC.e allowance for the exchange.');
+    if (CONFIG.SIGNATURE_TYPE === 0) {
+      console.log('      Run: npm run setup-approvals');
+    } else {
+      console.log('      Approve via Polymarket web interface.');
+    }
   }
   if (!ctfApproved) {
-    console.log('  [!] Proxy has not approved CTF tokens for the exchange.');
+    console.log('  [!] Maker has not approved CTF tokens for the exchange.');
     console.log('      SELL orders will fail until approved.');
+    if (CONFIG.SIGNATURE_TYPE === 0) {
+      console.log('      Run: npm run setup-approvals');
+    }
   }
 
   return { usdcAllowance: usdcAllowanceFormatted, ctfApproved: ctfApproved as boolean };
@@ -198,7 +210,7 @@ async function transferUsdcToProxy(
   console.log(`\n--- Transferring $${amount} USDC.e to proxy ---`);
 
   const connectedWallet = wallet.connect(provider);
-  const usdc = new Contract(CONFIG.USDC_E_ADDRESS, ERC20_ABI, connectedWallet);
+  const usdc = new Contract(CONFIG.PUSD_ADDRESS, ERC20_ABI, connectedWallet);
   const amountRaw = parseUnits(amount.toFixed(6), 6);
 
   const tx = await usdc.transfer(CONFIG.PROXY_ADDRESS, amountRaw);
@@ -284,28 +296,21 @@ async function getMidpoint(tokenId: string): Promise<number> {
   return parseFloat(data.mid);
 }
 
-async function getFeeRate(tokenId: string): Promise<string> {
-  const resp = await fetch(`${CONFIG.CLOB_URL}/fee-rate?token_id=${tokenId}`);
-  if (!resp.ok) return '0';
-  const data = (await resp.json()) as { fee_rate_bps?: string };
-  return data.fee_rate_bps ?? '0';
-}
-
 function buildOrderPayload(signed: SignedOrder, orderType: string) {
   return {
     order: {
       salt: parseInt(signed.salt, 10),
       maker: signed.maker,
       signer: signed.signer,
-      taker: signed.taker,
+      taker: CONFIG.ZERO_ADDRESS,
       tokenId: signed.tokenId,
       makerAmount: signed.makerAmount,
       takerAmount: signed.takerAmount,
       side: SIDE_STR[signed.side],
-      expiration: signed.expiration,
-      nonce: signed.nonce,
-      feeRateBps: signed.feeRateBps,
       signatureType: signed.signatureType,
+      timestamp: signed.timestamp,
+      metadata: signed.metadata,
+      builder: signed.builder,
       signature: signed.signature,
     },
     owner: CONFIG.API_KEY,
@@ -320,9 +325,6 @@ async function placeTestTrade(
   midpoint: number,
 ): Promise<string | null> {
   console.log('\n--- Step 6: Placing test limit order ---');
-
-  const feeRateBps = await getFeeRate(market.yesTokenId);
-  console.log(`  Fee rate: ${feeRateBps} bps`);
 
   // Price the order well below midpoint so it rests without matching
   const tick = market.tickSize;
@@ -341,7 +343,6 @@ async function placeTestTrade(
     side: Side.BUY,
     price: bidPrice,
     size: TEST_TRADE_SHARES,
-    feeRateBps,
     negRisk: market.negRisk,
   });
   const signed = await signOrder(wallet, rawOrder, market.negRisk);
@@ -411,14 +412,14 @@ async function main() {
   // Step 3: CLOB balance
   const clobResult = await checkClobBalance();
 
-  // Fund proxy if needed
-  if (proxyUsdc < MIN_USDC_FOR_TRADE) {
+  // For SIGNATURE_TYPE=0, wallet IS the maker — no proxy transfer needed.
+  // For proxy modes, fund proxy if balance is low.
+  if (CONFIG.SIGNATURE_TYPE !== 0 && proxyUsdc < MIN_USDC_FOR_TRADE) {
     console.log(`\n  Proxy USDC.e ($${proxyUsdc.toFixed(2)}) is below $${MIN_USDC_FOR_TRADE} minimum.`);
 
     if (walletUsdc < MIN_USDC_FOR_TRADE) {
       console.log(`  Wallet USDC.e ($${walletUsdc.toFixed(2)}) is also insufficient.`);
       console.log(`  Deposit USDC.e to wallet: ${CONFIG.WALLET_ADDRESS}`);
-      console.log(`  Or bridge via: https://polymarket.com`);
       process.exit(1);
     }
 
@@ -430,6 +431,10 @@ async function main() {
 
     const transferAmount = Math.min(walletUsdc, 20);
     await transferUsdcToProxy(wallet, provider, transferAmount);
+  } else if (CONFIG.SIGNATURE_TYPE === 0 && walletUsdc < MIN_USDC_FOR_TRADE) {
+    console.log(`\n  Wallet USDC.e ($${walletUsdc.toFixed(2)}) is below $${MIN_USDC_FOR_TRADE} minimum.`);
+    console.log(`  Send USDC to: ${CONFIG.WALLET_ADDRESS}`);
+    process.exit(1);
   }
 
   // Step 4: Find market
@@ -456,8 +461,8 @@ async function main() {
   console.log('\n=========================================================');
   console.log('  Preflight Results');
   console.log('=========================================================');
-  console.log(`  Wallet balance:     $${walletUsdc.toFixed(2)} USDC.e, ${walletPol.toFixed(4)} POL`);
-  console.log(`  Proxy balance:      $${proxyUsdc.toFixed(2)} USDC.e`);
+  console.log(`  Wallet balance:     $${walletUsdc.toFixed(2)} pUSD, ${walletPol.toFixed(4)} POL`);
+  console.log(`  Proxy balance:      $${proxyUsdc.toFixed(2)} pUSD`);
   console.log(`  Exchange allowance: $${usdcAllowance.toFixed(2)}`);
   console.log(`  Market:             "${market.question}"`);
   console.log(`  Trade result:       ${orderId ? 'SUCCESS (placed + cancelled)' : 'FAILED'}`);

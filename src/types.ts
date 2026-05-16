@@ -7,6 +7,7 @@ export const enum SignatureType {
   EOA = 0,
   POLY_PROXY = 1,
   POLY_GNOSIS_SAFE = 2,
+  POLY_1271 = 3,
 }
 
 export const enum OrderType {
@@ -16,38 +17,39 @@ export const enum OrderType {
   FAK = 'FAK',
 }
 
+// V2 signed struct (11 fields — taker/expiration/nonce/feeRateBps removed, timestamp/metadata/builder added)
 export interface RawOrder {
   salt: string;
   maker: string;
   signer: string;
-  taker: string;
   tokenId: string;
   makerAmount: string;
   takerAmount: string;
-  expiration: string;
-  nonce: string;
-  feeRateBps: string;
   side: number;
   signatureType: number;
+  timestamp: string;
+  metadata: string;
+  builder: string;
 }
 
 export interface SignedOrder extends RawOrder {
   signature: string;
 }
 
+// POST body sent to CLOB — same as signed struct but taker is added (ZeroAddress, not signed)
 export interface ApiOrder {
-  salt: string;
+  salt: number;
   maker: string;
   signer: string;
   taker: string;
   tokenId: string;
   makerAmount: string;
   takerAmount: string;
-  expiration: string;
-  nonce: string;
-  feeRateBps: string;
   side: string;
   signatureType: number;
+  timestamp: string;
+  metadata: string;
+  builder: string;
   signature: string;
 }
 
@@ -55,6 +57,7 @@ export interface OrderPayload {
   order: ApiOrder;
   owner: string;
   orderType: string;
+  deferExec?: boolean;
 }
 
 export interface PriceLevel {

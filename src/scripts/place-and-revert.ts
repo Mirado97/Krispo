@@ -83,28 +83,21 @@ async function getOrderBook(tokenId: string): Promise<OrderBook> {
   return resp.json() as Promise<OrderBook>;
 }
 
-async function getFeeRate(tokenId: string): Promise<string> {
-  const resp = await fetch(`${CONFIG.CLOB_URL}/fee-rate?token_id=${tokenId}`);
-  if (!resp.ok) return '1000';
-  const data = (await resp.json()) as { fee_rate_bps?: string; base_fee?: number };
-  return String(data.fee_rate_bps ?? data.base_fee ?? '1000');
-}
-
 function buildOrderPayload(signed: SignedOrder, orderType: string) {
   return {
     order: {
       salt: parseInt(signed.salt, 10),
       maker: signed.maker,
       signer: signed.signer,
-      taker: signed.taker,
+      taker: CONFIG.ZERO_ADDRESS,
       tokenId: signed.tokenId,
       makerAmount: signed.makerAmount,
       takerAmount: signed.takerAmount,
       side: SIDE_STR[signed.side],
-      expiration: signed.expiration,
-      nonce: signed.nonce,
-      feeRateBps: signed.feeRateBps,
       signatureType: signed.signatureType,
+      timestamp: signed.timestamp,
+      metadata: signed.metadata,
+      builder: signed.builder,
       signature: signed.signature,
     },
     owner: CONFIG.API_KEY,
@@ -141,8 +134,6 @@ async function main() {
   const tick = parseFloat(book.tick_size || '0.01');
   console.log(`   Best bid: ${bestBid.toFixed(2)} | Best ask: ${bestAsk.toFixed(2)} | Tick: ${tick}\n`);
 
-  const feeRateBps = await getFeeRate(market.yesTokenId);
-
   // 3. Place BUY - use best ask if reasonable, else midpoint to avoid empty book
   let buyPrice = bestAsk;
   if (bestAsk >= 0.99 || bestAsk <= 0.01) {
@@ -160,7 +151,6 @@ async function main() {
     side: Side.BUY,
     price: buyPrice,
     size: SHARES,
-    feeRateBps,
     negRisk: market.negRisk,
   });
   const signedBuy = await signOrder(wallet, rawBuy, market.negRisk);
@@ -187,7 +177,6 @@ async function main() {
     side: Side.SELL,
     price: sellPrice,
     size: SHARES,
-    feeRateBps,
     negRisk: market.negRisk,
   });
   const signedSell = await signOrder(wallet, rawSell, market.negRisk);
