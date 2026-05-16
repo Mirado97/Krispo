@@ -13,7 +13,7 @@
  *   npx tsx src/scripts/preflight-trade.ts
  */
 
-import { Wallet, JsonRpcProvider, Contract, formatUnits, parseUnits } from 'ethers';
+import { Wallet, JsonRpcProvider, Contract, formatUnits } from 'ethers';
 import { CONFIG } from '../config.js';
 import { buildHmacSignature } from '../signing/hmac.js';
 import { buildOrder, signOrder } from '../signing/eip712.js';
@@ -202,24 +202,6 @@ async function checkClobBalance() {
   }
 }
 
-async function transferUsdcToProxy(
-  wallet: Wallet,
-  provider: JsonRpcProvider,
-  amount: number,
-) {
-  console.log(`\n--- Transferring $${amount} USDC.e to proxy ---`);
-
-  const connectedWallet = wallet.connect(provider);
-  const usdc = new Contract(CONFIG.PUSD_ADDRESS, ERC20_ABI, connectedWallet);
-  const amountRaw = parseUnits(amount.toFixed(6), 6);
-
-  const tx = await usdc.transfer(CONFIG.PROXY_ADDRESS, amountRaw);
-  console.log(`  TX: ${tx.hash}`);
-  console.log(`  Waiting for confirmation...`);
-
-  const receipt = await tx.wait();
-  console.log(`  Confirmed in block ${receipt!.blockNumber}`);
-}
 
 async function findActiveMarket(): Promise<DiscoveredMarket> {
   console.log('\n--- Step 4: Finding an active market ---');
@@ -412,28 +394,14 @@ async function main() {
   // Step 3: CLOB balance
   const clobResult = await checkClobBalance();
 
-  // For SIGNATURE_TYPE=0, wallet IS the maker — no proxy transfer needed.
-  // For proxy modes, fund proxy if balance is low.
-  if (CONFIG.SIGNATURE_TYPE !== 0 && proxyUsdc < MIN_USDC_FOR_TRADE) {
-    console.log(`\n  Proxy USDC.e ($${proxyUsdc.toFixed(2)}) is below $${MIN_USDC_FOR_TRADE} minimum.`);
-
-    if (walletUsdc < MIN_USDC_FOR_TRADE) {
-      console.log(`  Wallet USDC.e ($${walletUsdc.toFixed(2)}) is also insufficient.`);
-      console.log(`  Deposit USDC.e to wallet: ${CONFIG.WALLET_ADDRESS}`);
-      process.exit(1);
-    }
-
-    if (walletPol < MIN_POL_FOR_GAS) {
-      console.log(`  Wallet POL (${walletPol.toFixed(4)}) too low for gas.`);
-      console.log(`  Send POL to: ${CONFIG.WALLET_ADDRESS}`);
-      process.exit(1);
-    }
-
-    const transferAmount = Math.min(walletUsdc, 20);
-    await transferUsdcToProxy(wallet, provider, transferAmount);
-  } else if (CONFIG.SIGNATURE_TYPE === 0 && walletUsdc < MIN_USDC_FOR_TRADE) {
-    console.log(`\n  Wallet USDC.e ($${walletUsdc.toFixed(2)}) is below $${MIN_USDC_FOR_TRADE} minimum.`);
-    console.log(`  Send USDC to: ${CONFIG.WALLET_ADDRESS}`);
+  // Balance checks only — no automatic transfers.
+  if (CONFIG.SIGNATURE_TYPE === 0 && walletUsdc < MIN_USDC_FOR_TRADE) {
+    console.log(`\n  Wallet pUSD ($${walletUsdc.toFixed(2)}) is below $${MIN_USDC_FOR_TRADE} minimum.`);
+    console.log(`  Fund wallet manually: ${CONFIG.WALLET_ADDRESS}`);
+    process.exit(1);
+  } else if (CONFIG.SIGNATURE_TYPE === 3 && proxyUsdc < MIN_USDC_FOR_TRADE) {
+    console.log(`\n  Deposit wallet pUSD ($${proxyUsdc.toFixed(2)}) is below $${MIN_USDC_FOR_TRADE} minimum.`);
+    console.log(`  Fund deposit wallet manually: ${CONFIG.PROXY_ADDRESS}`);
     process.exit(1);
   }
 

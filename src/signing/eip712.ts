@@ -1,6 +1,7 @@
 import { Wallet } from 'ethers';
 import { CONFIG } from '../config.js';
 import { type RawOrder, type SignedOrder, Side } from '../types.js';
+import { signOrderPoly1271 } from './poly1271.js';
 
 // V2 order struct — 11 fields (taker/expiration/nonce/feeRateBps removed, timestamp/metadata/builder added)
 const ORDER_EIP712_TYPES = {
@@ -106,9 +107,8 @@ export async function signOrder(
   negRisk: boolean,
 ): Promise<SignedOrder> {
   if (order.signatureType === 3) {
-    // POLY_1271: requires ERC-7739 wrapped signature for deposit wallet.
-    // Use @polymarket/clob-client-v2 for this — not yet implemented here.
-    throw new Error('POLY_1271 signing not yet implemented. Use SIGNATURE_TYPE=0 (EOA) or install @polymarket/clob-client-v2.');
+    const signature = await signOrderPoly1271(wallet, order, negRisk);
+    return { ...order, signature };
   }
   const domain = getExchangeDomain(negRisk);
   const signature = await wallet.signTypedData(domain, ORDER_EIP712_TYPES, order);
