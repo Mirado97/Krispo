@@ -15,7 +15,6 @@
     "test-discovery": "tsx src/scripts/test-discovery.ts",
     "place-and-revert": "tsx src/scripts/place-and-revert.ts",
     "setup-approvals": "tsx src/scripts/setup-approvals.ts",
-    "setup-deposit-wallet": "tsx src/scripts/setup-deposit-wallet.ts",
     "recover-proxy": "tsx src/scripts/recover-proxy-usdc.ts"
   },
   "dependencies": {
